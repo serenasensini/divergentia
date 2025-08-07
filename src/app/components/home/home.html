@@ -1,0 +1,30 @@
+<section>
+  <img src="assets/images/crystal.gif" alt="Crystal" class="img-fluid">
+  <div class="container">
+    @if (fileName) {
+      <span class="badge bg-success">File selezionato:</span>
+      <br/>
+      <br/>
+      <span class="badge bg-info">{{ fileName }}</span>
+      <p>Seleziona ambito:</p>
+      <select class="form-select" [(ngModel)]="selectedOption">
+        <option value="medico">Medico</option>
+        <option value="fin">Finanziario</option>
+        <option value="sport">Sportivo</option>
+      </select>
+      <button class="btn btn-primary" (click)="onSubmit()">Cominciamo!</button>
+      <button class="btn btn-secondary" (click)="reset()">Ricomincia</button>
+    } @else {
+      <input type="file" #fileInput (change)="onFileSelected($event)" style="display: none;" accept=".docx,.pdf">
+      <button class="btn btn-primary" (click)="fileInput.click()">Scegli file</button>
+
+      <div class="drop-zone" (dragover)="onDragOver($event)" (drop)="onDrop($event)">
+        <p>o trascina qui il tuo file</p>
+      </div>
+    }
+
+
+
+
+  </div>
+</section>

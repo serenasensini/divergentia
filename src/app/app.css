@@ -1,0 +1,12 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  font-family: "Play", sans-serif;
+}
+
+* {
+  font-family: inherit;
+}
