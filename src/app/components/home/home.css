@@ -10,3 +10,12 @@ img {
   width: 33%;
   height: auto;
 }
+
+.btn-primary{
+  border: green 3px solid !important;
+  background-color: seagreen;
+  color: white;
+  font-family: "Play", sans-serif !important;
+  font-weight: 400 !important;
+  font-size: 1.2rem !important;
+}
