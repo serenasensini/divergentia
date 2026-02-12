@@ -1,0 +1,37 @@
+meta {
+  name: Get Supported Formats
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/formats/supported
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.supported_formats: isDefined
+  res.body.format_details: isDefined
+}
+
+docs {
+  # Get Supported Formats
+
+  Ottiene la lista dei formati di documento supportati e i dettagli delle opzioni di formattazione disponibili per ciascun formato.
+
+  ## Response
+  ```json
+  {
+    "supported_formats": ["pdf", "docx", "txt", "rtf"],
+    "format_details": {
+      "docx": {
+        "format": "docx",
+        "supported": true,
+        "options": ["font_name", "font_size", "font_color", "bold", "italic", "alignment"]
+      }
+    }
+  }
+  ```
+}

@@ -1,0 +1,68 @@
+meta {
+  name: Paraphrase Document
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{base_url}}/documents/{{document_id}}/paraphrase
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "style": "formal",
+    "sections": null
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.document_id: eq {{document_id}}
+  res.body.style: eq formal
+  res.body.paraphrased_sections: isDefined
+}
+
+docs {
+  # Paraphrase Document
+
+  Parafrasa il contenuto del documento usando Ollama AI con diversi stili.
+
+  ## Prerequisites
+  - Ollama deve essere in esecuzione
+  - Documento deve essere stato caricato
+
+  ## Request Body
+  ```json
+  {
+    "style": "formal",        // Options: formal, casual, professional, simple
+    "sections": [0, 1, 2]     // Optional: parafrasa solo sezioni specifiche
+  }
+  ```
+
+  ## Styles
+  - **formal**: Stile formale e professionale
+  - **casual**: Stile casual e conversazionale
+  - **professional**: Stile professionale business
+  - **simple**: Linguaggio semplice e comprensibile
+
+  ## Response
+  ```json
+  {
+    "document_id": "uuid-string",
+    "document_name": "document.pdf",
+    "style": "formal",
+    "total_sections": 5,
+    "paraphrased_sections": {
+      "0": "Paraphrased text of section 0...",
+      "1": "Paraphrased text of section 1..."
+    }
+  }
+  ```
+
+  ## Note
+  - Se `sections` non è specificato, parafrasa tutte le sezioni
+  - Il documento viene diviso in chunk per l'elaborazione
+  - Rate limiting: 10 richieste per minuto
+}

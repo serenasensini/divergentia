@@ -1,0 +1,33 @@
+meta {
+  name: Paraphrase Document - Casual Style
+  type: http
+  seq: 8.1
+}
+
+post {
+  url: {{base_url}}/documents/{{document_id}}/paraphrase
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "style": "casual"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.style: eq casual
+}
+
+docs {
+  # Paraphrase Document - Casual Style
+
+  Parafrasa il documento in stile casual e conversazionale.
+
+  Ideale per:
+  - Rendere contenuti più accessibili
+  - Social media posts
+  - Comunicazione informale
+}

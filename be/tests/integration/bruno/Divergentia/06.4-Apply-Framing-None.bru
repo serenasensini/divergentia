@@ -1,0 +1,53 @@
+meta {
+  name: Apply Framing - No Selection (Error)
+  type: http
+  seq: 6.4
+}
+
+put {
+  url: {{base_url}}/documents/{{document_id}}/format
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "framing": {
+      "sections": false,
+      "paragraphs": false,
+      "subparagraphs": false,
+      "sentences": false
+    }
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.success: eq true
+  res.body.borders_applied: eq 0
+}
+
+docs {
+  # Apply Framing - No Selection
+
+  Test per verificare il comportamento quando nessun bordo è selezionato.
+
+  ## Request
+  ```json
+  {
+    "framing": {
+      "sections": false,
+      "paragraphs": false,
+      "subparagraphs": false,
+      "sentences": false
+    }
+  }
+  ```
+
+  ## Expected Behavior
+  - Nessun bordo viene applicato
+  - `borders_applied` dovrebbe essere 0
+  - Il file di output viene comunque creato
+  - Output file: `edited_[filename].docx`
+}
+

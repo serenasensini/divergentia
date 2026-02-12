@@ -1,0 +1,38 @@
+meta {
+  name: Download Document
+  type: http
+  seq: 12
+}
+
+get {
+  url: {{base_url}}/documents/{{document_id}}/download
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+}
+
+docs {
+  # Download Document
+
+  Scarica il documento (originale o formattato se disponibile).
+
+  ## Prerequisites
+  - Documento deve essere stato caricato
+
+  ## Response
+  - Content-Type: application/octet-stream o MIME type specifico
+  - Content-Disposition: attachment; filename="document.pdf"
+  - Body: File binario
+
+  ## Behavior
+  - Se è stata applicata formattazione, scarica il documento formattato
+  - Altrimenti scarica il documento originale
+  - Nome file preservato dall'upload originale
+
+  ## Note
+  - La risposta è un file binario, non JSON
+  - Usare "Save to file" in Bruno per salvare il download
+}

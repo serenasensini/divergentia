@@ -1,0 +1,57 @@
+meta {
+  name: Apply Framing - Sentences Only
+  type: http
+  seq: 6.3
+}
+
+put {
+  url: {{base_url}}/documents/{{document_id}}/format
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "framing": {
+      "sections": false,
+      "paragraphs": false,
+      "subparagraphs": false,
+      "sentences": true
+    }
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.success: eq true
+  res.body.output_path: isDefined
+  res.body.borders_applied: isDefined
+}
+
+docs {
+  # Apply Framing - Sentences Only
+
+  Test per applicare bordi solo alle frasi.
+
+  ## Request
+  ```json
+  {
+    "framing": {
+      "sections": false,
+      "paragraphs": false,
+      "subparagraphs": false,
+      "sentences": true
+    }
+  }
+  ```
+
+  ## Expected Behavior
+  - Le frasi vengono identificate come: spazio + lettera maiuscola fino a punteggiatura
+  - Bordi applicati ai paragrafi contenenti le frasi
+  - Output file: `edited_[filename].docx`
+
+  ## Note
+  L'applicazione di bordi a livello di singola frase in DOCX è complessa,
+  quindi i bordi vengono applicati ai paragrafi contenenti le frasi.
+}
+

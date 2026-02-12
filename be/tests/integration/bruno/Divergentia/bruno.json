@@ -1,0 +1,10 @@
+meta {
+  name: Divergentia API
+  type: collection
+  version: 1.0.0
+}
+
+vars {
+  base_url: http://localhost:5000/api
+  document_id:
+}

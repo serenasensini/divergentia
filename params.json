@@ -1,0 +1,57 @@
+{
+  "framing": {
+    "sections": false,
+    "paragraphs": false,
+    "subparagraphs": false,
+    "sentences": false
+  },
+  "summarization": {
+    "enabled": false,
+    "percentage": 0
+  },
+  "paragraphs": {
+    "enabled": false,
+    "percentage": 0
+  },
+  "compound": {
+    "enabled": false
+  },
+  "keywords": {
+    "enabled": false
+  },
+  "text_coloring": {
+    "enabled": false,
+    "titles": false,
+    "paragraphs": false,
+    "paragraphs_titles": false,
+    "captions": false,
+    "bibliography": false,
+    "theme": {
+      "red_green": {
+        "positive": "#00FF00",
+        "negative": "#FF0000"
+      },
+      "blue_orange": {
+        "positive": "#FFA500",
+        "negative": "#0000FF"
+      },
+      "purple_yellow": {
+        "positive": "#FFFF00",
+        "negative": "#800080"
+      }
+    }
+  },
+  "font": {
+    "enabled": false,
+    "type": "",
+    "size": 0
+  },
+  "highlighting": {
+    "enabled": false,
+    "color": "#FFFF00",
+    "nouns": false,
+    "verbs": false,
+    "adjectives": false,
+    "adverbs": false
+  }
+}

@@ -1,0 +1,40 @@
+meta {
+  name: Error - Upload Invalid File Type
+  type: http
+  seq: 99.1
+}
+
+post {
+  url: {{base_url}}/documents/upload
+  body: multipartForm
+  auth: none
+}
+
+body:multipart-form {
+  file: @file(invalid-file.exe)
+}
+
+assert {
+  res.status: eq 400
+  res.body.error: isDefined
+  res.body.message: isDefined
+}
+
+docs {
+  # Error Test - Invalid File Type
+
+  Testa il comportamento dell'API quando viene caricato un file con estensione non supportata.
+
+  ## Expected Response
+  ```json
+  {
+    "error": "FileUploadException",
+    "message": "File type 'exe' not allowed...",
+    "status_code": 400
+  }
+  ```
+
+  ## Note
+  Questo file non esiste realmente, è solo per dimostrare il comportamento dell'errore.
+  Per testare realmente, crea un file .exe dummy.
+}

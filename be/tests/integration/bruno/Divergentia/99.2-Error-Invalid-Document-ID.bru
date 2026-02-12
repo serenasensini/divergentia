@@ -1,0 +1,31 @@
+meta {
+  name: Error - Invalid Document ID
+  type: http
+  seq: 99.2
+}
+
+get {
+  url: {{base_url}}/documents/invalid-uuid-123/preview
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 400
+  res.body.error: isDefined
+}
+
+docs {
+  # Error Test - Invalid Document ID
+
+  Testa il comportamento quando viene fornito un document_id in formato non valido.
+
+  ## Expected Response
+  ```json
+  {
+    "error": "ValidationException",
+    "message": "Invalid document ID format",
+    "status_code": 400
+  }
+  ```
+}

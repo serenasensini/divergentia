@@ -1,0 +1,68 @@
+meta {
+  name: Paraphrase Text (Direct)
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{base_url}}/text/paraphrase
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "text": "This is an example text that needs to be paraphrased. The original wording will be transformed while maintaining the same meaning and intent.",
+    "style": "formal"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.paraphrased_text: isDefined
+  res.body.style: eq formal
+  res.body.original_length: isDefined
+}
+
+docs {
+  # Paraphrase Text (Direct)
+
+  Parafrasa direttamente un testo senza bisogno di caricare un documento.
+
+  ## Prerequisites
+  - Ollama deve essere in esecuzione
+
+  ## Request Body
+  ```json
+  {
+    "text": "Your text to paraphrase...",  // Required: Testo da parafrasare (min 10 char)
+    "style": "formal"                      // Optional: formal, casual, professional, simple
+  }
+  ```
+
+  ## Styles
+  - **formal**: Tono formale e professionale
+  - **casual**: Tono casual e conversazionale
+  - **professional**: Tono professionale per business
+  - **simple**: Linguaggio semplice e chiaro
+
+  ## Response
+  ```json
+  {
+    "paraphrased_text": "This represents an example...",
+    "style": "formal",
+    "original_length": 120,
+    "paraphrased_length": 125
+  }
+  ```
+
+  ## Use Cases
+  - Riformulare email
+  - Migliorare chiarezza testo
+  - Cambiare tono comunicazione
+  - Evitare ripetizioni
+  - Semplificare linguaggio tecnico
+
+  ## Rate Limiting
+  10 richieste per minuto
+}

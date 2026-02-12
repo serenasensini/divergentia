@@ -1,0 +1,30 @@
+[flake8]
+max-line-length = 120
+exclude =
+    .git,
+    __pycache__,
+    venv,
+    env,
+    .venv,
+    build,
+    dist,
+    *.egg-info
+ignore =
+    E203,
+    W503,
+    E501
+
+[pylint]
+max-line-length = 120
+disable =
+    C0111,
+    C0103,
+    R0903,
+    R0913
+
+[mypy]
+python_version = 3.9
+warn_return_any = True
+warn_unused_configs = True
+disallow_untyped_defs = False
+ignore_missing_imports = True

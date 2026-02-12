@@ -1,0 +1,31 @@
+meta {
+  name: Summarize Document - Detailed
+  type: http
+  seq: 7.1
+}
+
+post {
+  url: {{base_url}}/documents/{{document_id}}/summarize
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "summary_type": "detailed"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.summary_type: eq detailed
+}
+
+docs {
+  # Summarize Document - Detailed Version
+
+  Genera un riassunto dettagliato del documento (~800 parole).
+
+  Più lungo del riassunto "brief" ma più corto di "executive".
+  Ideale per ottenere una comprensione approfondita del documento.
+}

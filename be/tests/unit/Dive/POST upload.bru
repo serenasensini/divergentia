@@ -1,0 +1,20 @@
+meta {
+  name: POST upload
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{protocol}}://{{hostname}}:{{port}}/api/documents/upload
+  body: multipartForm
+  auth: inherit
+}
+
+body:multipart-form {
+  file: @file(C:\Users\serena.sensini\Downloads\Rendiconto dicembre 2024.pdf)
+}
+
+settings {
+  encodeUrl: false
+  timeout: 0
+}

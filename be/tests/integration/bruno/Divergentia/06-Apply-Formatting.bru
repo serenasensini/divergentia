@@ -1,0 +1,81 @@
+meta {
+  name: Apply Document Framing
+  type: http
+  seq: 6
+}
+
+put {
+  url: {{base_url}}/documents/{{document_id}}/format
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "framing": {
+      "sections": true,
+      "paragraphs": false,
+      "subparagraphs": false,
+      "sentences": false
+    }
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.success: eq true
+  res.body.output_path: isDefined
+  res.body.format: isDefined
+  res.body.borders_applied: isDefined
+}
+
+docs {
+  # Apply Document Framing (Borders)
+
+  Applica bordi alle diverse parti del documento (sezioni, paragrafi, sotto-paragrafi, frasi).
+
+  ## Request Body
+  ```json
+  {
+    "framing": {
+      "sections": false,        // Applica bordi alle sezioni
+      "paragraphs": false,      // Applica bordi ai paragrafi
+      "subparagraphs": false,   // Applica bordi ai sotto-paragrafi
+      "sentences": false        // Applica bordi alle frasi
+    }
+  }
+  ```
+
+  ## Definizioni Parti Documento
+  - **SENTENCE**: Da spazio + lettera maiuscola fino a punto o punteggiatura
+  - **SUBPARAGRAPH**: Insieme di periodi complessi dipendenti tra loro
+  - **PARAGRAPH**: Insieme di sotto-paragrafi
+  - **SECTION**: Gruppo di paragrafi da [spazio + lettera maiuscola] a [punto + line break]
+
+  ## Specifiche Bordi
+  - Larghezza: 1/2 pt (4 eighths)
+  - Colore: Nero (#000000)
+  - Stile: Solid
+
+  ## Response
+  ```json
+  {
+    "success": true,
+    "output_path": "outputs/edited_document.docx",
+    "format": "docx",
+    "borders_applied": 5,
+    "framing_options": {
+      "sections": true,
+      "paragraphs": false,
+      "subparagraphs": false,
+      "sentences": false
+    }
+  }
+  ```
+
+  ## Note
+  - Il file di output avrà il prefisso "edited_"
+  - DOCX ha supporto completo
+  - PDF ha implementazione di base
+  - I bordi si applicano indipendentemente se multiple opzioni sono selezionate
+}

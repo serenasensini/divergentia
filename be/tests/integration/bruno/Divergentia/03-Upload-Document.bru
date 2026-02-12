@@ -1,0 +1,55 @@
+meta {
+  name: Upload Document
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{base_url}}/documents/upload
+  body: multipartForm
+  auth: none
+}
+
+body:multipart-form {
+  file: @file(sample-document.txt)
+}
+
+assert {
+  res.status: eq 201
+  res.body.document_id: isDefined
+  res.body.original_filename: isDefined
+  res.body.message: eq Document uploaded successfully
+}
+
+script:post-response {
+  // Save document_id for subsequent requests
+  if (res.body.document_id) {
+    bru.setVar("document_id", res.body.document_id);
+  }
+}
+
+docs {
+  # Upload Document
+
+  Carica un documento sul server. Formati supportati: PDF, DOCX, DOC, TXT, RTF.
+
+  ## Request
+  - Content-Type: multipart/form-data
+  - Body: file (binary)
+
+  ## Response
+  ```json
+  {
+    "document_id": "uuid-string",
+    "original_filename": "document.pdf",
+    "file_size": 12345,
+    "mime_type": "application/pdf",
+    "file_extension": "pdf",
+    "message": "Document uploaded successfully"
+  }
+  ```
+
+  ## Note
+  - Il document_id viene salvato automaticamente come variabile per le richieste successive
+  - Dimensione massima file: 10MB (configurabile)
+}

@@ -1,0 +1,67 @@
+meta {
+  name: Summarize Document
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{base_url}}/documents/{{document_id}}/summarize
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "summary_type": "brief"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.document_id: eq {{document_id}}
+  res.body.summary: isDefined
+  res.body.key_points: isDefined
+}
+
+docs {
+  # Summarize Document
+
+  Genera un riassunto del documento usando Ollama AI.
+
+  ## Prerequisites
+  - Ollama deve essere in esecuzione
+  - Documento deve essere stato caricato
+
+  ## Request Body
+  ```json
+  {
+    "summary_type": "brief"  // Options: brief, detailed, executive
+  }
+  ```
+
+  ## Summary Types
+  - **brief**: Riassunto breve (~200 parole)
+  - **detailed**: Riassunto dettagliato (~800 parole)
+  - **executive**: Riassunto executive (~400 parole)
+
+  ## Response
+  ```json
+  {
+    "document_id": "uuid-string",
+    "document_name": "document.pdf",
+    "summary": "This document discusses...",
+    "key_points": [
+      "Key point 1",
+      "Key point 2",
+      "Key point 3"
+    ],
+    "summary_type": "brief",
+    "original_length": 5000,
+    "summary_length": 200,
+    "compression_ratio": 0.04
+  }
+  ```
+
+  ## Rate Limiting
+  Endpoint protetto da rate limiting: 10 richieste per minuto
+}

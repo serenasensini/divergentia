@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  # Flask API
+  api:
+    build: ./be
+    container_name: divergentia-api
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=production
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - CORS_ORIGINS=http://localhost:4200
+    volumes:
+      - ./be/uploads:/app/uploads
+      - ./be/outputs:/app/outputs
+      - ./be/logs:/app/logs
+    depends_on:
+      - ollama
+    networks:
+      - divergentia-network
+    restart: unless-stopped
+
+  # Ollama Service
+  ollama:
+    image: ollama/ollama:latest
+    container_name: divergentia-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - divergentia-network
+    restart: unless-stopped
+
+volumes:
+  ollama-data:
+
+networks:
+  divergentia-network:
+    driver: bridge
