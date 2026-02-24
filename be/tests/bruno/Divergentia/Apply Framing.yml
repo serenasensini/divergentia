@@ -1,0 +1,31 @@
+info:
+  name: Apply Framing
+  type: http
+  seq: 4
+
+http:
+  method: PUT
+  url: "{{protocol}}://{{hostname}}:{{port}}/api/documents/{{document_id}}/framing"
+  body:
+    type: json
+    data: |-
+      {
+          "framing": {
+            "sections": false,
+            "paragraphs": true,
+            "subparagraphs": false,
+            "sentences": false
+          }
+        }
+  auth: inherit
+
+runtime:
+  variables:
+    - name: document_id
+      value: e82b16ff-533c-45c5-8344-823bd61b891c
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

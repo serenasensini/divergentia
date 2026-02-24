@@ -1,0 +1,39 @@
+meta {
+  name: Extract Text from Document
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{base_url}}/documents/{{document_id}}/extract-text
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.document_id: eq {{document_id}}
+  res.body.text_content: isDefined
+  res.body.character_count: isDefined
+  res.body.word_count: isDefined
+}
+
+docs {
+  # Extract Text from Document
+
+  Estrae il contenuto testuale da un documento precedentemente caricato.
+
+  ## Prerequisites
+  - Documento deve essere stato caricato con successo
+  - document_id deve essere valido
+
+  ## Response
+  ```json
+  {
+    "document_id": "uuid-string",
+    "text_content": "Extracted text from document...",
+    "character_count": 1234,
+    "word_count": 200
+  }
+  ```
+}

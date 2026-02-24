@@ -1,0 +1,54 @@
+meta {
+  name: Apply Framing - Multiple Parts
+  type: http
+  seq: 6.2
+}
+
+put {
+  url: {{base_url}}/documents/{{document_id}}/format
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "framing": {
+      "sections": true,
+      "paragraphs": true,
+      "subparagraphs": false,
+      "sentences": false
+    }
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.success: eq true
+  res.body.output_path: isDefined
+  res.body.borders_applied: isDefined
+}
+
+docs {
+  # Apply Framing - Multiple Parts
+
+  Test per applicare bordi a sezioni E paragrafi contemporaneamente.
+
+  ## Request
+  ```json
+  {
+    "framing": {
+      "sections": true,
+      "paragraphs": true,
+      "subparagraphs": false,
+      "sentences": false
+    }
+  }
+  ```
+
+  ## Expected Behavior
+  - I bordi si applicano indipendentemente
+  - Sia le sezioni che i paragrafi avranno bordi
+  - I bordi possono sovrapporsi visivamente
+  - Output file: `edited_[filename].docx`
+}
+

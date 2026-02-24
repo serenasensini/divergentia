@@ -1,0 +1,36 @@
+meta {
+  name: Health Check
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{base_url}}/health
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.status: eq healthy
+  res.body.api_version: isDefined
+}
+
+docs {
+  # Health Check
+
+  Verifica lo stato di salute dell'API e la connessione a Ollama.
+
+  ## Response
+  ```json
+  {
+    "status": "healthy",
+    "api_version": "1.0.0",
+    "ollama_status": {
+      "status": "healthy",
+      "model": "llama2",
+      "available": true
+    }
+  }
+  ```
+}

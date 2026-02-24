@@ -1,0 +1,32 @@
+meta {
+  name: Error - Document Not Found
+  type: http
+  seq: 99.3
+}
+
+get {
+  url: {{base_url}}/documents/00000000-0000-0000-0000-000000000000/preview
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 404
+  res.body.error: eq DocumentNotFoundException
+}
+
+docs {
+  # Error Test - Document Not Found
+
+  Testa il comportamento quando viene richiesto un documento che non esiste.
+
+  ## Expected Response
+  ```json
+  {
+    "error": "DocumentNotFoundException",
+    "message": "Document with ID '00000000-0000-0000-0000-000000000000' not found",
+    "status_code": 404,
+    "document_id": "00000000-0000-0000-0000-000000000000"
+  }
+  ```
+}

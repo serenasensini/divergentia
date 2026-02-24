@@ -1,0 +1,46 @@
+meta {
+  name: Get Document Preview
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{base_url}}/documents/{{document_id}}/preview
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.document_id: eq {{document_id}}
+  res.body.original_filename: isDefined
+  res.body.text_preview: isDefined
+}
+
+docs {
+  # Get Document Preview
+
+  Ottiene un'anteprima del documento con metadata e excerpt del testo.
+
+  ## Prerequisites
+  - Documento deve essere stato caricato
+
+  ## Response
+  ```json
+  {
+    "document_id": "uuid-string",
+    "original_filename": "document.pdf",
+    "file_size": 12345,
+    "file_extension": "pdf",
+    "text_preview": "First 300 characters of the document...",
+    "character_count": 5000,
+    "word_count": 850
+  }
+  ```
+
+  ## Use Cases
+  - Anteprima rapida contenuto
+  - Verifica documento caricato
+  - Preview prima elaborazione
+  - Check contenuto estratto
+}

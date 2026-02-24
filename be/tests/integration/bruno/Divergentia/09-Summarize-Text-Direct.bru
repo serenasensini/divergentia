@@ -1,0 +1,61 @@
+meta {
+  name: Summarize Text (Direct)
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{base_url}}/text/summarize
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "text": "This is a long text that needs to be summarized. It contains multiple sentences and paragraphs with important information that should be condensed into a brief summary. The text discusses various topics and provides detailed explanations that can be shortened while maintaining the key points and main ideas.",
+    "max_length": 500
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.summary: isDefined
+  res.body.original_length: isDefined
+  res.body.summary_length: isDefined
+}
+
+docs {
+  # Summarize Text (Direct)
+
+  Riassume direttamente un testo senza bisogno di caricare un documento.
+  Utile per riassunti rapidi di testo breve.
+
+  ## Prerequisites
+  - Ollama deve essere in esecuzione
+
+  ## Request Body
+  ```json
+  {
+    "text": "Your long text here...",    // Required: Testo da riassumere (min 10 char)
+    "max_length": 500                    // Optional: Lunghezza massima riassunto (50-2000)
+  }
+  ```
+
+  ## Response
+  ```json
+  {
+    "summary": "This text discusses...",
+    "original_length": 350,
+    "summary_length": 85
+  }
+  ```
+
+  ## Use Cases
+  - Riassunto rapido di email
+  - Condensare note
+  - Estrazione concetti chiave
+  - Preview contenuto
+
+  ## Rate Limiting
+  10 richieste per minuto
+}

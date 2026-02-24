@@ -1,0 +1,30 @@
+This is a sample text document for testing the Divergentia API.
+
+This document contains multiple paragraphs and can be used to test various features of the API including:
+
+1. Document Upload
+2. Text Extraction
+3. Summarization
+4. Paraphrasing
+5. Formatting
+
+The API supports multiple document formats including PDF, DOCX, DOC, TXT, and RTF files.
+
+Text Processing Features:
+The Ollama integration allows for sophisticated text processing using local AI models. Users can summarize documents in different lengths (brief, detailed, or executive) and paraphrase text in various styles (formal, casual, professional, or simple).
+
+Formatting Capabilities:
+Documents can be formatted programmatically with options to change:
+- Font family (e.g., Arial, Times New Roman, Calibri)
+- Font size (ranging from 6 to 72 points)
+- Font color (using hex color codes)
+- Text styling (bold, italic)
+- Text alignment (left, center, right, justify)
+
+This sample document is long enough to test text chunking and batch processing features, which are important for handling large documents efficiently.
+
+Security and Performance:
+The API implements rate limiting to prevent abuse, with different limits for regular endpoints (20 per minute) and AI-powered endpoints (10 per minute). File uploads are validated for type and size, with a default maximum of 10MB.
+
+Integration:
+The API is designed to work seamlessly with Angular frontends, providing CORS support and structured JSON responses that map directly to TypeScript interfaces.

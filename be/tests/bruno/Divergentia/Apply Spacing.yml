@@ -1,0 +1,29 @@
+info:
+  name: Apply Spacing
+  type: http
+  seq: 6
+
+http:
+  method: PUT
+  url: "{{protocol}}://{{hostname}}:{{port}}/api/documents/{{document_id}}/spacing"
+  body:
+    type: json
+    data: |-
+      {
+        "spacing": {
+          "paragraphs": true,
+          "sentences": false
+        }
+      }
+  auth: inherit
+
+runtime:
+  variables:
+    - name: document_id
+      value: 64836353-f93a-4209-8e1a-e5bb560f479e
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

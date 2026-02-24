@@ -1,0 +1,56 @@
+meta {
+  name: Apply Framing - Paragraphs Only
+  type: http
+  seq: 6.1
+}
+
+put {
+  url: {{protocol}}://{{hostname}}:{{port}}/api/documents/{{document_id}}/format
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "framing": {
+      "sections": false,
+      "paragraphs": false,
+      "subparagraphs": false,
+      "sentences": true
+    }
+  }
+}
+
+vars:pre-request {
+  document_id: 6f08f23c-94d7-4571-a802-d8259df3c94b
+}
+
+assert {
+  res.status: eq 200
+  res.body.success: eq true
+  res.body.output_path: isDefined
+  res.body.borders_applied: isDefined
+}
+
+docs {
+  # Apply Framing - Paragraphs Only
+  
+  Test per applicare bordi solo ai paragrafi.
+  
+  ## Request
+  ```json
+  {
+    "framing": {
+      "sections": false,
+      "paragraphs": true,
+      "subparagraphs": false,
+      "sentences": false
+    }
+  }
+  ```
+  
+  ## Expected Behavior
+  - Solo i paragrafi avranno bordi
+  - Le sezioni non avranno bordi
+  - Output file: `edited_[filename].docx`
+}

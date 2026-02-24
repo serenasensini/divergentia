@@ -1,0 +1,48 @@
+meta {
+  name: Get Document Styles
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{base_url}}/documents/{{document_id}}/styles
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.format: isDefined
+  res.body.supported: isDefined
+  res.body.options: isDefined
+}
+
+docs {
+  # Get Document Styles
+
+  Ottiene le opzioni di formattazione disponibili per il documento specificato, in base al suo formato.
+
+  ## Prerequisites
+  - Documento deve essere stato caricato con successo
+
+  ## Response
+  ```json
+  {
+    "format": "docx",
+    "supported": true,
+    "options": ["font_name", "font_size", "font_color", "bold", "italic", "alignment"],
+    "option_details": {
+      "font_name": {
+        "type": "string",
+        "description": "Font family name",
+        "examples": ["Arial", "Times New Roman", "Calibri"]
+      },
+      "font_size": {
+        "type": "number",
+        "description": "Font size in points",
+        "examples": [10, 11, 12, 14, 16]
+      }
+    }
+  }
+  ```
+}
