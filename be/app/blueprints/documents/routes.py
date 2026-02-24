@@ -18,7 +18,7 @@ from app.utils.validators import (
     SummarizeRequestSchema,
     ParaphraseRequestSchema,
     TextSummarizeRequestSchema,
-    TextParaphraseRequestSchema
+    TextParaphraseRequestSchema, SpacingOptionsSchema
 )
 from app.exceptions.custom_exceptions import (
     FileUploadException,
@@ -184,9 +184,80 @@ def extract_text(document_id: str):
 
     return jsonify(result), 200
 
-
 @documents_bp.route('/documents/<document_id>/format', methods=['PUT'])
 def apply_formatting(document_id: str):
+    """
+    Apply formatting to document parts.
+
+    Args:
+        document_id: Document ID
+
+    Request Body:
+        {
+	"formatting": {
+		"titles": false,
+		"paragraphs": false,
+		"paragraphs_titles": false,
+		"captions": false,
+		"bibliography": false,
+		"theme": {
+		  "red_green": {
+			"positive": "#00FF00",
+			"negative": "#FF0000"
+		  },
+		  "blue_orange": {
+			"positive": "#FFA500",
+			"negative": "#0000FF"
+		  },
+		  "purple_yellow": {
+			"positive": "#FFFF00",
+			"negative": "#800080"
+		    }
+		    }
+          }
+        }
+
+    Returns:
+        JSON response with formatted result
+
+    Example Response:
+        {
+            "success": true,
+            "output_path": "/path/to/edited_document.docx",
+            "format": "docx",
+            "borders_applied": 5,
+            "formatting_options": {...}
+        }
+    """
+    logger.info(f"Formatting requested for document {document_id}")
+
+    validate_document_id(document_id)
+
+    # Validate request data
+    data = request.get_json()
+    if not data:
+        raise ValidationException("Request body is required")
+
+    if 'formatting' not in data:
+        raise ValidationException("'formatting' field is required in request body")
+
+    validated_data = validate_schema(FormattingOptionsSchema, data['formatting'])
+    logger.debug(f"Validated formatting options: {validated_data.dict()}")
+
+    # Apply framing
+    document_service = get_document_service()
+    output_folder = current_app.config['OUTPUT_FOLDER']
+
+    result = document_service.apply_formatting(
+        document_id=document_id,
+        formatting_options=validated_data.dict(),
+        output_folder=output_folder
+    )
+
+    return jsonify(result), 200
+
+@documents_bp.route('/documents/<document_id>/framing', methods=['PUT'])
+def apply_framing(document_id: str):
     """
     Apply framing (borders) to document parts.
 
@@ -195,13 +266,36 @@ def apply_formatting(document_id: str):
 
     Request Body:
         {
-            "framing": {
-                "sections": false,
-                "paragraphs": false,
-                "subparagraphs": false,
-                "sentences": false
-            }
-        }
+	"framing": {
+		"sections": false,
+		"paragraphs": false,
+		"subparagraphs": false,
+		"sentences": false,
+		"colour": ""
+	},
+	"text_coloring": {
+		"enabled": false,
+		"titles": false,
+		"paragraphs": false,
+		"paragraphs_titles": false,
+		"captions": false,
+		"bibliography": false,
+		"theme": {
+		  "red_green": {
+			"positive": "#00FF00",
+			"negative": "#FF0000"
+		  },
+		  "blue_orange": {
+			"positive": "#FFA500",
+			"negative": "#0000FF"
+		  },
+		  "purple_yellow": {
+			"positive": "#FFFF00",
+			"negative": "#800080"
+		  }
+		}
+  }
+}
 
     Returns:
         JSON response with framing result
@@ -241,6 +335,58 @@ def apply_formatting(document_id: str):
 
     return jsonify(result), 200
 
+@documents_bp.route('/documents/<document_id>/spacing', methods=['PUT'])
+def apply_spacing(document_id: str):
+    """
+    Add space between document parts. When paragraphs are selected, add space between paragraphs. When sentences are
+    selected, add space between sentences.
+
+    Args:
+        document_id: Document ID
+
+    Request Body:
+        {
+            "spacing": {
+                "paragraphs": false,
+                "sentences": false
+            },
+        }
+
+    Returns:
+        JSON response with sacing result
+
+    Example Response:
+        {
+            "success": true,
+            "output_path": "/path/to/edited_document.docx",
+            "format": "docx",
+        }
+    """
+    logger.info(f"Spacing requested for document {document_id}")
+
+    validate_document_id(document_id)
+
+    # Validate request data
+    data = request.get_json()
+    if not data:
+        raise ValidationException("Request body is required")
+
+    if 'spacing' not in data:
+        raise ValidationException("'spacing' field is required in request body")
+
+    validated_data = validate_schema(SpacingOptionsSchema, data['spacing'])
+
+    # Apply framing
+    document_service = get_document_service()
+    output_folder = current_app.config['OUTPUT_FOLDER']
+
+    result = document_service.apply_spacing(
+        document_id=document_id,
+        spacing_options=validated_data.dict(),
+        output_folder=output_folder
+    )
+
+    return jsonify(result), 200
 
 @documents_bp.route('/documents/<document_id>/styles', methods=['GET'])
 def get_document_styles(document_id: str):

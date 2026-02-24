@@ -206,6 +206,45 @@ class DocumentService:
 
         return result
 
+    def apply_spacing(
+        self,
+        document_id: str,
+        spacing_options: Dict[str, bool],
+        output_folder: str
+    ) -> Dict[str, Any]:
+        """
+        Apply spacing adjustments to document parts.
+
+        Args:
+            document_id: Document ID
+            spacing_options: Spacing options (paragraphs, senteces)
+            output_folder: Folder to save framed document
+
+        Returns:
+            Dictionary with result information
+        """
+        logger.info(f"Applying spacing to document {document_id}")
+
+        document = self.get_document(document_id)
+
+        # Generate output path with "edited_" prefix
+        timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        output_filename = f"spacing_{timestamp}_{document['original_filename']}"
+        output_path = os.path.join(output_folder, output_filename)
+
+        # Apply framing
+        result = self.formatting_service.apply_spacing(
+            document['file_path'],
+            output_path,
+            spacing_options
+        )
+
+        # Update document record
+        document['formatted_path'] = output_path
+        document['modified_at'] = None  # Add timestamp in production
+
+        return result
+
 # FIXME include a percentage for needed summarization
     def summarize_document(
         self,

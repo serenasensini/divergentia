@@ -21,6 +21,11 @@ class FramingOptionsSchema(BaseModel):
     subparagraphs: bool = Field(False, description="Apply borders to subparagraphs")
     sentences: bool = Field(False, description="Apply borders to sentences")
 
+class SpacingOptionsSchema(BaseModel):
+    """Schema for spacing options"""
+    paragraphs: bool = Field(False, description="Apply space to paragraphs")
+    sentences: bool = Field(False, description="Apply space to sentences")
+
 
 class FormattingOptionsSchema(BaseModel):
     """Schema for formatting options"""
@@ -30,6 +35,12 @@ class FormattingOptionsSchema(BaseModel):
     bold: Optional[bool] = Field(None, description="Apply bold formatting")
     italic: Optional[bool] = Field(None, description="Apply italic formatting")
     alignment: Optional[str] = Field(None, description="Text alignment")
+    titles: Optional[bool] = Field(None, description="Apply titles formatting")
+    paragraphs: Optional[bool] = Field(None, description="Apply paragraphs formatting")
+    paragraphs_titles: Optional[bool] = Field(None, description="Apply paragraphs and titles formatting")
+    captions: Optional[bool] = Field(None, description="Apply captions formatting")
+    bibliography: Optional[bool] = Field(None, description="Apply bibliography formatting")
+    theme: Optional[Dict[str, str]] = Field(None, description="Apply theme formatting")
 
     @validator('font_color')
     def validate_color(cls, v):
