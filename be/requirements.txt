@@ -19,7 +19,7 @@ ollama==0.1.6
 requests==2.31.0
 
 # Data Validation
-pydantic==2.6.1
+pydantic==2.7.4
 marshmallow==3.20.2
 
 # Security & Rate Limiting
@@ -46,6 +46,9 @@ pre-commit==3.6.0
 
 # Production Server
 gunicorn==21.2.0
+
+# NLP for Keyword Extraction
+spacy==3.7.4
 
 # Utilities
 python-magic-bin==0.4.14  # For Windows file type detection

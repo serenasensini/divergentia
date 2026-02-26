@@ -18,7 +18,9 @@ from app.utils.validators import (
     SummarizeRequestSchema,
     ParaphraseRequestSchema,
     TextSummarizeRequestSchema,
-    TextParaphraseRequestSchema, SpacingOptionsSchema
+    TextParaphraseRequestSchema,
+    SpacingOptionsSchema,
+    KeywordOptionsSchema
 )
 from app.exceptions.custom_exceptions import (
     FileUploadException,
@@ -383,6 +385,66 @@ def apply_spacing(document_id: str):
     result = document_service.apply_spacing(
         document_id=document_id,
         spacing_options=validated_data.dict(),
+        output_folder=output_folder
+    )
+
+    return jsonify(result), 200
+
+@documents_bp.route('/documents/<document_id>/keywords', methods=['PUT'])
+def add_keywords(document_id: str):
+    """
+    Extract keywords from document sections and add them as initial paragraphs after headings.
+
+    For each section (identified by Heading 2, 3, etc.), this endpoint:
+    1. Extracts the most relevant nouns using spaCy NLP (Italian language model)
+    2. Adds a paragraph with the keywords right after the section heading
+    3. Formats the keywords in italic style
+
+    Args:
+        document_id: Document ID
+
+    Request Body:
+        {
+            "keywords": {
+                "max_keywords": 5,
+                "include_proper_nouns": true
+            }
+        }
+
+    Returns:
+        JSON response with keyword extraction result
+
+    Example Response:
+        {
+            "success": true,
+            "output_path": "/path/to/keywords_document.docx",
+            "format": "docx",
+            "sections_processed": 10,
+            "total_keywords": 45,
+            "keyword_options": {...}
+        }
+    """
+    logger.info(f"Keyword extraction requested for document {document_id}")
+
+    validate_document_id(document_id)
+
+    # Validate request data
+    data = request.get_json()
+    if not data:
+        raise ValidationException("Request body is required")
+
+    if 'keywords' not in data:
+        raise ValidationException("'keywords' field is required in request body")
+
+    validated_data = validate_schema(KeywordOptionsSchema, data['keywords'])
+
+    # Apply keyword extraction
+    document_service = get_document_service()
+    output_folder = current_app.config['OUTPUT_FOLDER']
+
+    result = document_service.apply_keywords(
+        document_id=document_id,
+        keyword_options=validated_data.dict(),
         output_folder=output_folder
     )
 

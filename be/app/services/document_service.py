@@ -245,6 +245,45 @@ class DocumentService:
 
         return result
 
+    def apply_keywords(
+        self,
+        document_id: str,
+        keyword_options: Dict[str, Any],
+        output_folder: str
+    ) -> Dict[str, Any]:
+        """
+        Extract keywords from document sections and add them as initial paragraphs.
+
+        Args:
+            document_id: Document ID
+            keyword_options: Keyword extraction options (max_keywords, include_proper_nouns)
+            output_folder: Folder to save processed document
+
+        Returns:
+            Dictionary with result information
+        """
+        logger.info(f"Applying keyword extraction to document {document_id}")
+
+        document = self.get_document(document_id)
+
+        # Generate output path with "keywords_" prefix
+        timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        output_filename = f"keywords_{timestamp}_{document['original_filename']}"
+        output_path = os.path.join(output_folder, output_filename)
+
+        # Apply keyword extraction
+        result = self.formatting_service.apply_keywords(
+            document['file_path'],
+            output_path,
+            keyword_options
+        )
+
+        # Update document record
+        document['formatted_path'] = output_path
+        document['modified_at'] = None  # Add timestamp in production
+
+        return result
+
 # FIXME include a percentage for needed summarization
     def summarize_document(
         self,
