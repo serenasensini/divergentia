@@ -21,7 +21,7 @@ class KeywordService:
         try:
             import spacy
             try:
-                self.nlp = spacy.load("it_core_news_lg-3.8.0")
+                self.nlp = spacy.load("it_core_news_lg")
                 logger.info("Italian spaCy model loaded successfully")
             except OSError:
                 logger.warning("Italian spaCy model not found. Attempting to download...")

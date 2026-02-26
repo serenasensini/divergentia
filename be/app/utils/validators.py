@@ -31,6 +31,7 @@ class KeywordOptionsSchema(BaseModel):
     """Schema for keyword extraction options"""
     max_keywords: Optional[int] = Field(5, ge=1, le=10, description="Maximum number of keywords per section")
     include_proper_nouns: Optional[bool] = Field(True, description="Include proper nouns (names, places)")
+    model: Optional[str] = Field(None, description="Ollama model to use for keyword extraction (e.g., 'llama2', 'mistral')")
 
 
 class FormattingOptionsSchema(BaseModel):

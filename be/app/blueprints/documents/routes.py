@@ -393,36 +393,170 @@ def apply_spacing(document_id: str):
 @documents_bp.route('/documents/<document_id>/keywords', methods=['PUT'])
 def add_keywords(document_id: str):
     """
-    Extract keywords from document sections and add them as initial paragraphs after headings.
+    Estrae parole chiave dalle sezioni di un documento e le inserisce come paragrafi formattati.
 
-    For each section (identified by Heading 2, 3, etc.), this endpoint:
-    1. Extracts the most relevant nouns using spaCy NLP (Italian language model)
-    2. Adds a paragraph with the keywords right after the section heading
-    3. Formats the keywords in italic style
+    Questo endpoint analizza il documento identificando le sezioni strutturali e per ciascuna
+    estrae le parole chiave più rilevanti utilizzando Ollama (con fallback automatico a spaCy).
+    Le parole chiave vengono inserite come paragrafo formattato subito dopo il titolo della sezione.
+
+    Funzionalità:
+    - Identificazione automatica delle sezioni tramite:
+      * Stili Heading (Heading 2, 3, etc.)
+      * Pattern di testo (es. " A.", " B.")
+      * Formattazione speciale (grassetto + font > 11pt)
+    - Estrazione keywords con AI (Ollama) o NLP (spaCy)
+    - Supporto per modelli Ollama personalizzati
+    - Formattazione automatica delle keywords (italico, 10pt)
+    - Fallback robusto in caso di indisponibilità di Ollama
+
+    Flusso di elaborazione:
+    1. Validazione del documento e dei parametri
+    2. Identificazione delle sezioni nel documento
+    3. Per ogni sezione:
+       - Estrazione del testo completo
+       - Analisi con Ollama (o spaCy come fallback)
+       - Inserimento paragrafo formattato con keywords
+    4. Salvataggio del nuovo documento
+    5. Restituzione metadati dell'operazione
 
     Args:
-        document_id: Document ID
+        document_id (str): ID univoco del documento da processare (UUID format)
 
-    Request Body:
+    Request Body (JSON):
         {
             "keywords": {
-                "max_keywords": 5,
-                "include_proper_nouns": true
+                "max_keywords": int,              // Numero di keywords per sezione (1-10)
+                                                  // Default: 5
+                                                  // Required: No
+
+                "include_proper_nouns": bool,     // Include nomi propri (per fallback spaCy)
+                                                  // Default: true
+                                                  // Required: No
+
+                "model": str                      // Modello Ollama specifico da usare
+                                                  // Esempi: "llama2", "mistral", "phi"
+                                                  // Default: modello configurato nel server
+                                                  // Required: No
             }
         }
 
-    Returns:
-        JSON response with keyword extraction result
+        Nota: Il campo "keywords" è obbligatorio, ma tutti i suoi parametri sono opzionali
 
-    Example Response:
+    Returns:
+        JSON response (200 OK):
         {
             "success": true,
-            "output_path": "/path/to/keywords_document.docx",
+            "output_path": str,                   // Path del file generato
             "format": "docx",
-            "sections_processed": 10,
-            "total_keywords": 45,
-            "keyword_options": {...}
+            "sections_processed": int,            // Numero di sezioni elaborate
+            "total_keywords": int,                // Totale keywords estratte
+            "keyword_options": {                  // Opzioni utilizzate
+                "max_keywords": int,
+                "include_proper_nouns": bool,
+                "model": str | null
+            },
+            "extraction_method": str,             // "Ollama", "spaCy", o
+                                                  // "Ollama with spaCy fallback"
+            "ollama_used": bool,                  // True se Ollama è stato usato
+            "spacy_fallback_used": bool          // True se fallback attivato
         }
+
+    Raises:
+        ValidationException (400): Se:
+            - Request body mancante o malformato
+            - Campo "keywords" mancante
+            - max_keywords fuori range (1-10)
+            - document_id in formato invalido
+
+        DocumentNotFoundException (404): Se il documento non esiste
+
+        FormattingException (500): Se si verifica un errore durante l'elaborazione
+
+    Example Request 1 - Configurazione base:
+        POST /documents/abc-123-def-456/keywords
+        Content-Type: application/json
+
+        {
+            "keywords": {
+                "max_keywords": 5
+            }
+        }
+
+    Example Request 2 - Configurazione completa con modello specifico:
+        POST /documents/abc-123-def-456/keywords
+        Content-Type: application/json
+
+        {
+            "keywords": {
+                "max_keywords": 7,
+                "include_proper_nouns": true,
+                "model": "llama2"
+            }
+        }
+
+    Example Request 3 - Modello veloce per processing rapido:
+        POST /documents/abc-123-def-456/keywords
+        Content-Type: application/json
+
+        {
+            "keywords": {
+                "max_keywords": 3,
+                "model": "phi"
+            }
+        }
+
+    Example Response - Successo con Ollama:
+        {
+            "success": true,
+            "output_path": "/path/to/keywords_20260226120000_document.docx",
+            "format": "docx",
+            "sections_processed": 5,
+            "total_keywords": 35,
+            "keyword_options": {
+                "max_keywords": 7,
+                "include_proper_nouns": true,
+                "model": "llama2"
+            },
+            "extraction_method": "Ollama",
+            "ollama_used": true,
+            "spacy_fallback_used": false
+        }
+
+    Example Response - Nessuna sezione trovata:
+        {
+            "success": true,
+            "output_path": "/path/to/keywords_20260226120000_document.docx",
+            "format": "docx",
+            "sections_processed": 0,
+            "total_keywords": 0,
+            "keyword_options": {...},
+            "extraction_method": "N/A",
+            "ollama_used": false,
+            "spacy_fallback_used": false,
+            "note": "No sections found in document"
+        }
+
+    Notes:
+        - Il documento originale non viene modificato
+        - Viene creato un nuovo file con prefisso "keywords_" e timestamp
+        - Richiede Ollama in esecuzione su http://localhost:11434 per estrazione AI
+        - Se Ollama non è disponibile, usa automaticamente spaCy (NLP tradizionale)
+        - Il modello Ollama specificato deve essere già scaricato (ollama pull <model>)
+        - Per documenti senza sezioni riconoscibili, applica stili Heading ai titoli
+        - Keywords inserite in formato: "Parole chiave: keyword1, keyword2, keyword3"
+        - Formattazione keywords: italico, font 10pt, posizionate dopo il titolo
+        - Supporta solo formato DOCX
+
+    Performance:
+        - Con Ollama (llama2): ~2-5 secondi per sezione
+        - Con Ollama (phi): ~1-3 secondi per sezione
+        - Con spaCy: < 1 secondo per sezione
+        - La cache riduce significativamente i tempi per richieste ripetute
+
+    See Also:
+        - GET /documents/{document_id} - Informazioni sul documento
+        - GET /documents/{document_id}/download - Download documento processato
+        - POST /documents/upload - Upload nuovo documento
     """
     logger.info(f"Keyword extraction requested for document {document_id}")
 

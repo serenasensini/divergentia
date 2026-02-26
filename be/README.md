@@ -33,6 +33,9 @@ python -m venv venv
 # Activate virtual environment
 .\venv\Scripts\Activate.ps1
 
+# For Linux
+source venv/bin/activate
+
 # Install dependencies
 pip install -r requirements.txt
 ```
