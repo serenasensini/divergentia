@@ -8,14 +8,12 @@ from pathlib import Path
 
 from docx import Document
 from docx.shared import Pt, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 # import pymupdf  # PyMuPDF
 
 from app.exceptions.custom_exceptions import (
     FormattingException,
-    FileProcessingException
 )
 
 logger = logging.getLogger(__name__)
@@ -174,6 +172,48 @@ class FormattingService:
         except Exception as e:
             logger.error(f"Framing error: {str(e)}")
             raise FormattingException(f"Failed to apply framing: {str(e)}")
+
+    def apply_keywords(
+        self,
+        input_path: str,
+        output_path: str,
+        keyword_options: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Extract keywords from document sections and add them as initial paragraphs.
+
+        Args:
+            input_path: Input file path
+            output_path: Output file path
+            keyword_options: Dictionary with keyword extraction options
+
+        Returns:
+            Result information including number of sections processed
+        """
+        logger.info(f"Applying keyword extraction to {input_path}")
+
+        # Determine file type
+        file_extension = Path(input_path).suffix.lower().lstrip('.')
+
+        if file_extension not in self.SUPPORTED_FORMATS:
+            raise FormattingException(
+                f"Unsupported file format: {file_extension}",
+                payload={'supported_formats': list(self.SUPPORTED_FORMATS.keys())}
+            )
+
+        # Apply keywords based on file type
+        try:
+            if file_extension == 'docx':
+                logger.debug(f"Keyword options received: {keyword_options}")
+                return self._apply_keywords_docx(input_path, output_path, keyword_options)
+            elif file_extension == 'pdf':
+                raise FormattingException("PDF keyword extraction is not currently supported")
+            else:
+                raise FormattingException(f"Keyword extraction not supported for {file_extension}")
+
+        except Exception as e:
+            logger.error(f"Keyword extraction error: {str(e)}")
+            raise FormattingException(f"Failed to apply keyword extraction: {str(e)}")
 
     def _format_docx(
         self,
@@ -471,6 +511,28 @@ class FormattingService:
 
         pPr.append(pBdr)
 
+    # FIXME: funziona con i paragrafi ma non con le frasi, da capire se è un problema di identificazione o di applicazione del bordo
+    def _add_sentence_border(self, sentence) -> None:
+        """
+        Add border to a sentence.
+
+        Args:
+            paragraph: python-docx paragraph object
+        """
+        pPr = sentence._element.get_or_add_pPr()
+        pBdr = OxmlElement('w:pBdr')
+
+        for border_name in ['top', 'left', 'bottom', 'right']:
+            border = OxmlElement(f'w:{border_name}')
+            border.set(qn('w:val'), self.DEFAULT_BORDER_STYLE)
+            border.set(qn('w:sz'), str(self.DEFAULT_BORDER_WIDTH))
+            border.set(qn('w:space'), '1')
+            border.set(qn('w:color'), self.DEFAULT_BORDER_COLOR)
+            pBdr.append(border)
+
+        pPr.append(pBdr)
+
+
     def _add_paragraph_spacing(self, paragraph) -> None:
         """
         Add a new line before and after a paragraph.
@@ -480,11 +542,10 @@ class FormattingService:
         """
         # Add a new line before the input paragraph
         p = paragraph._element
-        new_p_before = OxmlElement('w:p')
-        p.addprevious(new_p_before)
-        # Add a new line after the input paragraph
-        new_p_after = OxmlElement('w:p')
-        p.addnext(new_p_after)
+        # Add <w:br/> before the paragraph
+        p.addprevious(OxmlElement('w:br'))
+        # Add <w:br/> after the paragraph
+        p.addnext(OxmlElement('w:br'))
 
 
     def _add_sentence_spacing(self, sentence) -> None:
@@ -648,16 +709,22 @@ class FormattingService:
         sentence_map = []
 
         for i, para in enumerate(doc.paragraphs):
-            text = para.text
-            if not text.strip():
+            # If paragraph style is Heading, we skip sentence splitting as it's likely a title
+            if 'Heading' in para.style.name:
+                logger.debug(f"Skipping sentence identification for paragraph {i} as it is a Heading 1")
                 continue
+            else:
+                text = para.text
+                logger.debug(f"Analyzing paragraph {i} for sentences: '{text[:30]}...'")
+                if not text.strip():
+                    continue
 
             # Split into sentences (by period, exclamation, question mark followed by space)
             sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', text)
             sentences = [s.strip() for s in sentences if s.strip()]
 
             if sentences:
-                logger.debug(f"Identified sentences in paragraph {i}: {sentences[:30]}...")
+                logger.debug(f"Identified sentences in paragraph {i}: {sentences}")
                 sentence_map.append((i, sentences))
 
         total_sentences = sum(len(sents) for _, sents in sentence_map)
@@ -831,7 +898,7 @@ class FormattingService:
                 paragraphs = self._identify_paragraphs(doc)
                 for idx in paragraphs:
                     logger.debug(f"Applying border to paragraph {idx}: '{doc.paragraphs[idx].text}...'")
-                    self._add_paragraph_border(doc.paragraphs[idx])
+                    self._add_sentence_border(doc.paragraphs[idx])
                     borders_applied += 1
                 logger.info(f"Applied borders to {len(paragraphs)} paragraphs")
 
@@ -846,12 +913,13 @@ class FormattingService:
             if framing_options.get('sentences', False):
                 sentence_map = self._identify_sentences(doc)
                 logger.debug(f"Sentence map example: {sentence_map[:3]}")
-                # For sentences, we need to create separate runs with borders
-                # This is complex in DOCX, so we apply borders to paragraphs containing sentences
+                # Apply border to each sentence
+
                 for para_idx, sentences in sentence_map:
                     logger.debug(f"Applying sentence borders to paragraph {para_idx} with sentences: {sentences[:3]}")
                     if len(sentences) > 0:
-                        self._add_paragraph_border(doc.paragraphs[para_idx])
+                        self._add
+                        # self._add_paragraph_border(doc.paragraphs[para_idx])
                         borders_applied += 1
                 logger.info(f"Applied borders to paragraphs containing sentences")
 
@@ -941,6 +1009,123 @@ class FormattingService:
         #     logger.error(f"PDF framing error: {str(e)}")
         #     raise FormattingException(f"PDF framing failed: {str(e)}")
         pass
+
+    def _apply_keywords_docx(
+        self,
+        input_path: str,
+        output_path: str,
+        keyword_options: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Extract keywords from document sections and add them as initial paragraphs.
+
+        Args:
+            input_path: Input file path
+            output_path: Output file path
+            keyword_options: Dictionary with keyword extraction options
+
+        Returns:
+            Result information including number of sections processed
+        """
+        logger.info("Applying keyword extraction to DOCX document")
+
+        try:
+            from app.services.keyword_service import get_keyword_service
+
+            # Load document
+            doc = Document(input_path)
+            keyword_service = get_keyword_service()
+
+            # Get options
+            max_keywords = keyword_options.get('max_keywords', 5)
+            include_proper_nouns = keyword_options.get('include_proper_nouns', True)
+
+            sections_processed = 0
+            total_keywords_extracted = 0
+
+            # Identify sections and their content
+            # A section is defined by a heading (Heading 2, 3, etc.) followed by content paragraphs
+            i = 0
+            while i < len(doc.paragraphs):
+                para = doc.paragraphs[i]
+                style_name = para.style.name
+
+                # Check if this is a section heading (Heading 2, 3, 4, etc. but not Heading 1)
+                is_section_heading = 'Heading' in style_name and style_name != 'Heading 1'
+
+                if is_section_heading:
+                    logger.debug(f"Found section heading at index {i}: '{para.text[:50]}...'")
+
+                    # Collect text from all paragraphs in this section until the next heading
+                    section_text = []
+                    j = i + 1
+
+                    while j < len(doc.paragraphs):
+                        next_para = doc.paragraphs[j]
+                        next_style = next_para.style.name
+
+                        # Stop if we hit another heading
+                        if 'Heading' in next_style:
+                            break
+
+                        # Add paragraph text if not empty
+                        if next_para.text.strip():
+                            section_text.append(next_para.text)
+
+                        j += 1
+
+                    # Extract keywords from section text
+                    if section_text:
+                        combined_text = ' '.join(section_text)
+                        keywords = keyword_service.extract_keywords(
+                            combined_text,
+                            max_keywords=max_keywords,
+                            include_proper_nouns=include_proper_nouns
+                        )
+
+                        if keywords:
+                            # Format keywords
+                            keyword_text = keyword_service.format_keywords(keywords)
+                            logger.debug(f"Extracted keywords for section '{para.text[:30]}...': {keyword_text}")
+
+                            # Insert keyword paragraph right after the heading
+                            # We need to insert at position i+1
+                            new_para = para._element.addnext(
+                                doc.add_paragraph(keyword_text)._element
+                            )
+
+                            # Apply italic style to the keyword paragraph
+                            keyword_para = doc.paragraphs[i + 1]
+                            for run in keyword_para.runs:
+                                run.italic = True
+                                run.font.size = Pt(10)
+
+                            sections_processed += 1
+                            total_keywords_extracted += len(keywords)
+
+                            # Skip the newly inserted paragraph
+                            i += 1
+
+                i += 1
+
+            # Save document
+            doc.save(output_path)
+
+            logger.info(f"DOCX keyword extraction completed: {sections_processed} sections processed, "
+                       f"{total_keywords_extracted} keywords extracted")
+
+            return {
+                'success': True,
+                'output_path': output_path,
+                'format': 'docx',
+                'sections_processed': sections_processed,
+                'total_keywords': total_keywords_extracted,
+                'keyword_options': keyword_options
+            }
+
+        except Exception as e:
+            logger.error(f"DOCX keyword extraction error: {str(e)}")
+            raise FormattingException(f"DOCX keyword extraction failed: {str(e)}")
 
     def get_available_styles(self, file_format: str) -> Dict[str, Any]:
         """

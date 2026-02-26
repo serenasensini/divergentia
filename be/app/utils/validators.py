@@ -27,6 +27,12 @@ class SpacingOptionsSchema(BaseModel):
     sentences: bool = Field(False, description="Apply space to sentences")
 
 
+class KeywordOptionsSchema(BaseModel):
+    """Schema for keyword extraction options"""
+    max_keywords: Optional[int] = Field(5, ge=1, le=10, description="Maximum number of keywords per section")
+    include_proper_nouns: Optional[bool] = Field(True, description="Include proper nouns (names, places)")
+
+
 class FormattingOptionsSchema(BaseModel):
     """Schema for formatting options"""
     font_name: Optional[str] = Field(None, description="Font family name")
