@@ -324,16 +324,6 @@ Paraphrased text:"""
             OllamaConnectionException: Se la connessione al servizio Ollama fallisce
             OllamaProcessingException: Se si verifica un errore durante l'elaborazione
 
-        Example:
-            >>> ollama_service = get_ollama_service()
-            >>> keywords = ollama_service.extract_keywords(
-            ...     text="L'intelligenza artificiale sta rivoluzionando il mondo della tecnologia",
-            ...     max_keywords=3,
-            ...     model="llama2"
-            ... )
-            >>> print(keywords)
-            ['intelligenza', 'artificiale', 'tecnologia']
-
         Note:
             - Il prompt richiede al modello di rispondere SOLO con parole chiave separate da virgola
             - La funzione gestisce automaticamente risposte con formati diversi (numerazioni, prefissi)
@@ -356,14 +346,18 @@ Paraphrased text:"""
 
         try:
             prompt = f"""Estrai le {max_keywords} parole chiave più rilevanti da questo testo.
-Rispondi SOLO con le parole chiave separate da virgola, senza numerazione o spiegazioni.
-
-Testo:
-{text}
-
-Parole chiave:"""
-
+                    Rispondi SOLO con le parole chiave separate da virgola, senza numerazione o spiegazioni. Le parole chiave devono essere nella lingua originale
+                    del testo riportato di seguito e rappresentare i concetti più importanti. Non includere stop words o parole comuni, ma solo termini significativi per il contenuto.
+                    Non usare sinonimi della stessa parola, ma scegli la forma più rappresentativa. Se il testo è troppo lungo, concentrati sulle sezioni più rilevanti.
+                    Usare per l'output solo la lingua originale del testo, senza traduzioni o adattamenti.
+                    
+                    Testo:
+                    {text}
+                    
+                    Parole chiave:"""
+            logger.debug(f"Prompt for keyword extraction: {prompt}")
             response = self._generate_completion(prompt)
+            logger.debug(f"Raw response for keyword extraction: {response.strip()}")
 
             # Parse response - expecting comma-separated keywords
             keywords_text = response.strip()
@@ -415,14 +409,19 @@ Parole chiave:"""
         logger.info(f"Extracting {num_points} key points from text")
 
         prompt = f"""Please extract the {num_points} most important key points from the following text.
-Present each point as a clear, concise bullet point.
-
-Text:
-{text}
-
-Key points (one per line, numbered):"""
-
+                Present each point as a clear, concise bullet point. Use simple language and focus on the main ideas without unnecessary details.
+                The output should be a list of key points, each on a new line, without numbering or additional formatting, with
+                the same language as the input text and the same level of formality. Keywords shouldn't include stop words or common words, 
+                but should be relevant to the main topics of the text and they shouldn't include synonyms of the same word. If the text is too long, 
+                focus on the most relevant sections to extract key points.
+                
+                Text:
+                {text}
+                
+                Key points (one per line, numbered):"""
+        logger.debug(f"Prompt for key point extraction: {prompt}")
         response = self._generate_completion(prompt)
+        logger.debug(f"Extracted {num_points} key points: {response.strip()}")
 
         # Parse response into list
         lines = response.strip().split('\n')

@@ -85,15 +85,21 @@ def setup_logging(app: Flask) -> None:
     """
     log_level = getattr(logging, app.config.get('LOG_LEVEL', 'INFO'))
 
-    # Console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(log_level)
+    # Remove all existing handlers from app.logger to prevent duplicates
+    app.logger.handlers.clear()
+
+    # Create formatter
     console_formatter = logging.Formatter(
         '[%(asctime)s] %(levelname)s in %(module)s: %(message)s'
     )
+
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(log_level)
     console_handler.setFormatter(console_formatter)
 
-    # File handler
+    # File handler (optional)
+    file_handler = None
     if app.config.get('LOG_FILE'):
         file_handler = logging.FileHandler(app.config['LOG_FILE'])
         file_handler.setLevel(log_level)
@@ -102,6 +108,17 @@ def setup_logging(app: Flask) -> None:
 
     app.logger.addHandler(console_handler)
     app.logger.setLevel(log_level)
+
+    # Prevent propagation to avoid duplicate logs
+    app.logger.propagate = False
+
+    # Configure root logger for module loggers to prevent duplicates
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.addHandler(console_handler)
+    root_logger.setLevel(log_level)
+    if file_handler:
+        root_logger.addHandler(file_handler)
 
     app.logger.info('Flask application initialized')
 

@@ -87,6 +87,10 @@ class ProductionConfig(Config):
         import logging
         from logging.handlers import RotatingFileHandler
 
+        # Clear existing handlers to prevent duplicates
+        # (setup_logging in __init__.py will be called first)
+        # This just adds an additional rotating file handler for production
+
         # Setup rotating file handler for production
         file_handler = RotatingFileHandler(
             'production.log',
@@ -94,7 +98,13 @@ class ProductionConfig(Config):
             backupCount=10
         )
         file_handler.setLevel(logging.WARNING)
-        app.logger.addHandler(file_handler)
+        file_handler.setFormatter(logging.Formatter(
+            '[%(asctime)s] %(levelname)s in %(module)s: %(message)s'
+        ))
+
+        # Only add if not already present
+        if file_handler not in app.logger.handlers:
+            app.logger.addHandler(file_handler)
 
 
 class TestingConfig(Config):

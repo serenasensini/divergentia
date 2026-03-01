@@ -34,6 +34,58 @@ class KeywordOptionsSchema(BaseModel):
     model: Optional[str] = Field(None, description="Ollama model to use for keyword extraction (e.g., 'llama2', 'mistral')")
 
 
+class HighlightingOptionsSchema(BaseModel):
+    """Schema for part-of-speech text formatting options"""
+    enabled: bool = Field(False, description="Enable text formatting")
+    color: Optional[str] = Field("#000000", description="Text color in hex format")
+    style: Optional[str] = Field(None, description="Text style: bold, italic, underline, or combinations like 'bold,italic'")
+    font_size: Optional[int] = Field(None, ge=6, le=72, description="Font size in points (6-72)")
+    font_family: Optional[str] = Field(None, description="Font family name (e.g., 'Times New Roman', 'Arial', 'Courier New')")
+    nouns: Optional[bool] = Field(False, description="Format nouns")
+    verbs: Optional[bool] = Field(False, description="Format verbs")
+    adjectives: Optional[bool] = Field(False, description="Format adjectives")
+    adverbs: Optional[bool] = Field(False, description="Format adverbs")
+
+    @validator('color')
+    def validate_color(cls, v):
+        """Validate hex color format"""
+        if v is not None:
+            # Remove # if present
+            color = v.lstrip('#')
+            if not re.match(r'^[0-9A-Fa-f]{6}$', color):
+                raise ValueError('Color must be in hex format (e.g., #FFFF00 or FFFF00)')
+            return f"#{color}"  # Ensure it has # prefix
+        return v
+
+    @validator('style')
+    def validate_style(cls, v):
+        """Validate style value"""
+        if v is not None:
+            allowed = ['bold', 'italic', 'underline']
+            styles = [s.strip().lower() for s in v.split(',')]
+            for style in styles:
+                if style not in allowed:
+                    raise ValueError(f'Style must be one or more of: {", ".join(allowed)} (comma-separated)')
+            return ','.join(styles)  # Normalize
+        return v
+
+    @validator('font_family')
+    def validate_font_family(cls, v):
+        """Validate font family"""
+        if v is not None:
+            # Common font families for validation
+            common_fonts = [
+                'times new roman', 'arial', 'courier new', 'calibri',
+                'georgia', 'verdana', 'helvetica', 'open sans',
+                'roboto', 'comic sans ms', 'impact'
+            ]
+            # Allow any font but warn if not common
+            if v.lower() not in common_fonts:
+                # Still allow it but could log a warning
+                pass
+        return v
+
+
 class FormattingOptionsSchema(BaseModel):
     """Schema for formatting options"""
     font_name: Optional[str] = Field(None, description="Font family name")

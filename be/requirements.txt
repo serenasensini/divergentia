@@ -48,8 +48,13 @@ pre-commit==3.6.0
 gunicorn==21.2.0
 
 # NLP for Keyword Extraction
-spacy==3.7.4
+spacy==3.8.0
 
 # Utilities
 # python-magic-bin==0.4.14  # For Windows file type detection
 python-magic===0.4.27
+urllib3==1.26.*
+chardet==5.*
+#charset-normalizer==5.*
+
+# python -m pip install urllib3==1.26.* chardet==5.* charset-normalizer==5.*
