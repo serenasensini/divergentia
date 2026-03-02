@@ -1,0 +1,36 @@
+info:
+  name: Apply Formatting
+  type: http
+  seq: 5
+
+http:
+  method: PUT
+  url: "{{protocol}}://{{hostname}}:{{port}}/api/documents/{{document_id}}/format"
+  body:
+    type: json
+    data: |-
+      {
+        "formatting": {
+          "titles": true,
+          "paragraphs": false,
+          "paragraphs_titles": false,
+          "captions": true,
+          "bibliography": false,
+          "theme": {
+            "positive": "#00FF00",
+            "negative": "#FF0000"
+          }
+        }
+      }
+  auth: inherit
+
+runtime:
+  variables:
+    - name: document_id
+      value: a172638c-4e47-4cae-998c-4ff10d59c317
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

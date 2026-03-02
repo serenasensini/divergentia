@@ -20,7 +20,8 @@ from app.utils.validators import (
     TextSummarizeRequestSchema,
     TextParaphraseRequestSchema,
     SpacingOptionsSchema,
-    KeywordOptionsSchema
+    KeywordOptionsSchema,
+    HighlightingOptionsSchema
 )
 from app.exceptions.custom_exceptions import (
     FileUploadException,
@@ -393,36 +394,170 @@ def apply_spacing(document_id: str):
 @documents_bp.route('/documents/<document_id>/keywords', methods=['PUT'])
 def add_keywords(document_id: str):
     """
-    Extract keywords from document sections and add them as initial paragraphs after headings.
+    Estrae parole chiave dalle sezioni di un documento e le inserisce come paragrafi formattati.
 
-    For each section (identified by Heading 2, 3, etc.), this endpoint:
-    1. Extracts the most relevant nouns using spaCy NLP (Italian language model)
-    2. Adds a paragraph with the keywords right after the section heading
-    3. Formats the keywords in italic style
+    Questo endpoint analizza il documento identificando le sezioni strutturali e per ciascuna
+    estrae le parole chiave più rilevanti utilizzando Ollama (con fallback automatico a spaCy).
+    Le parole chiave vengono inserite come paragrafo formattato subito dopo il titolo della sezione.
+
+    Funzionalità:
+    - Identificazione automatica delle sezioni tramite:
+      * Stili Heading (Heading 2, 3, etc.)
+      * Pattern di testo (es. " A.", " B.")
+      * Formattazione speciale (grassetto + font > 11pt)
+    - Estrazione keywords con AI (Ollama) o NLP (spaCy)
+    - Supporto per modelli Ollama personalizzati
+    - Formattazione automatica delle keywords (italico, 10pt)
+    - Fallback robusto in caso di indisponibilità di Ollama
+
+    Flusso di elaborazione:
+    1. Validazione del documento e dei parametri
+    2. Identificazione delle sezioni nel documento
+    3. Per ogni sezione:
+       - Estrazione del testo completo
+       - Analisi con Ollama (o spaCy come fallback)
+       - Inserimento paragrafo formattato con keywords
+    4. Salvataggio del nuovo documento
+    5. Restituzione metadati dell'operazione
 
     Args:
-        document_id: Document ID
+        document_id (str): ID univoco del documento da processare (UUID format)
 
-    Request Body:
+    Request Body (JSON):
         {
             "keywords": {
-                "max_keywords": 5,
-                "include_proper_nouns": true
+                "max_keywords": int,              // Numero di keywords per sezione (1-10)
+                                                  // Default: 5
+                                                  // Required: No
+
+                "include_proper_nouns": bool,     // Include nomi propri (per fallback spaCy)
+                                                  // Default: true
+                                                  // Required: No
+
+                "model": str                      // Modello Ollama specifico da usare
+                                                  // Esempi: "llama2", "mistral", "phi"
+                                                  // Default: modello configurato nel server
+                                                  // Required: No
             }
         }
 
-    Returns:
-        JSON response with keyword extraction result
+        Nota: Il campo "keywords" è obbligatorio, ma tutti i suoi parametri sono opzionali
 
-    Example Response:
+    Returns:
+        JSON response (200 OK):
         {
             "success": true,
-            "output_path": "/path/to/keywords_document.docx",
+            "output_path": str,                   // Path del file generato
             "format": "docx",
-            "sections_processed": 10,
-            "total_keywords": 45,
-            "keyword_options": {...}
+            "sections_processed": int,            // Numero di sezioni elaborate
+            "total_keywords": int,                // Totale keywords estratte
+            "keyword_options": {                  // Opzioni utilizzate
+                "max_keywords": int,
+                "include_proper_nouns": bool,
+                "model": str | null
+            },
+            "extraction_method": str,             // "Ollama", "spaCy", o
+                                                  // "Ollama with spaCy fallback"
+            "ollama_used": bool,                  // True se Ollama è stato usato
+            "spacy_fallback_used": bool          // True se fallback attivato
         }
+
+    Raises:
+        ValidationException (400): Se:
+            - Request body mancante o malformato
+            - Campo "keywords" mancante
+            - max_keywords fuori range (1-10)
+            - document_id in formato invalido
+
+        DocumentNotFoundException (404): Se il documento non esiste
+
+        FormattingException (500): Se si verifica un errore durante l'elaborazione
+
+    Example Request 1 - Configurazione base:
+        POST /documents/abc-123-def-456/keywords
+        Content-Type: application/json
+
+        {
+            "keywords": {
+                "max_keywords": 5
+            }
+        }
+
+    Example Request 2 - Configurazione completa con modello specifico:
+        POST /documents/abc-123-def-456/keywords
+        Content-Type: application/json
+
+        {
+            "keywords": {
+                "max_keywords": 7,
+                "include_proper_nouns": true,
+                "model": "llama2"
+            }
+        }
+
+    Example Request 3 - Modello veloce per processing rapido:
+        POST /documents/abc-123-def-456/keywords
+        Content-Type: application/json
+
+        {
+            "keywords": {
+                "max_keywords": 3,
+                "model": "phi"
+            }
+        }
+
+    Example Response - Successo con Ollama:
+        {
+            "success": true,
+            "output_path": "/path/to/keywords_20260226120000_document.docx",
+            "format": "docx",
+            "sections_processed": 5,
+            "total_keywords": 35,
+            "keyword_options": {
+                "max_keywords": 7,
+                "include_proper_nouns": true,
+                "model": "llama2"
+            },
+            "extraction_method": "Ollama",
+            "ollama_used": true,
+            "spacy_fallback_used": false
+        }
+
+    Example Response - Nessuna sezione trovata:
+        {
+            "success": true,
+            "output_path": "/path/to/keywords_20260226120000_document.docx",
+            "format": "docx",
+            "sections_processed": 0,
+            "total_keywords": 0,
+            "keyword_options": {...},
+            "extraction_method": "N/A",
+            "ollama_used": false,
+            "spacy_fallback_used": false,
+            "note": "No sections found in document"
+        }
+
+    Notes:
+        - Il documento originale non viene modificato
+        - Viene creato un nuovo file con prefisso "keywords_" e timestamp
+        - Richiede Ollama in esecuzione su http://localhost:11434 per estrazione AI
+        - Se Ollama non è disponibile, usa automaticamente spaCy (NLP tradizionale)
+        - Il modello Ollama specificato deve essere già scaricato (ollama pull <model>)
+        - Per documenti senza sezioni riconoscibili, applica stili Heading ai titoli
+        - Keywords inserite in formato: "Parole chiave: keyword1, keyword2, keyword3"
+        - Formattazione keywords: italico, font 10pt, posizionate dopo il titolo
+        - Supporta solo formato DOCX
+
+    Performance:
+        - Con Ollama (llama2): ~2-5 secondi per sezione
+        - Con Ollama (phi): ~1-3 secondi per sezione
+        - Con spaCy: < 1 secondo per sezione
+        - La cache riduce significativamente i tempi per richieste ripetute
+
+    See Also:
+        - GET /documents/{document_id} - Informazioni sul documento
+        - GET /documents/{document_id}/download - Download documento processato
+        - POST /documents/upload - Upload nuovo documento
     """
     logger.info(f"Keyword extraction requested for document {document_id}")
 
@@ -450,7 +585,274 @@ def add_keywords(document_id: str):
 
     return jsonify(result), 200
 
-@documents_bp.route('/documents/<document_id>/styles', methods=['GET'])
+@documents_bp.route('/documents/<document_id>/highlighting', methods=['PUT'])
+def apply_pos_highlighting(document_id: str):
+    """
+    Apply part-of-speech text formatting to document.
+
+    This endpoint analyzes the document text to identify specific parts of speech (nouns, verbs,
+    adjectives, adverbs) and applies custom formatting (color, font, style) based on user preferences.
+
+    Features:
+    - Part-of-speech identification using spaCy NLP
+    - Customizable text color
+    - Font family selection (Times New Roman, Arial, Courier New, etc.)
+    - Font size adjustment (6-72 pt)
+    - Text styles: bold, italic, underline (individually or combined)
+    - Selective formatting by POS type
+    - Maintains original document structure
+    - Supports Italian and multi-language documents
+
+    Workflow:
+    1. Validate document and options
+    2. Load document and analyze text
+    3. For each paragraph:
+       - Tokenize and identify parts of speech
+       - Apply formatting to selected POS types
+       - Preserve original paragraph structure
+    4. Save new formatted document
+    5. Return processing statistics
+
+    Args:
+        document_id (str): ID of the document to process (UUID format)
+
+    Request Body (JSON):
+        {
+            "highlighting": {
+                "enabled": bool,              // Enable text formatting
+                                              // Default: false
+                                              // Required: Yes
+
+                "color": str,                 // Text color (hex format)
+                                              // Examples: "#FF0000" (red), "#0000FF" (blue), "#000000" (black)
+                                              // Default: "#000000" (black)
+                                              // Required: No
+
+                "style": str,                 // Text style(s)
+                                              // Values: "bold", "italic", "underline"
+                                              // Can combine: "bold,italic" or "bold,italic,underline"
+                                              // Default: null (no style)
+                                              // Required: No
+
+                "font_size": int,             // Font size in points
+                                              // Range: 6-72
+                                              // Default: null (unchanged)
+                                              // Required: No
+
+                "font_family": str,           // Font family name
+                                              // Examples: "Times New Roman", "Arial", "Courier New",
+                                              //           "Calibri", "Georgia", "Open Sans"
+                                              // Default: null (unchanged)
+                                              // Required: No
+
+                "nouns": bool,                // Format nouns and proper nouns
+                                              // Default: false
+                                              // Required: No
+
+                "verbs": bool,                // Format verbs
+                                              // Default: false
+                                              // Required: No
+
+                "adjectives": bool,           // Format adjectives
+                                              // Default: false
+                                              // Required: No
+
+                "adverbs": bool              // Format adverbs
+                                              // Default: false
+                                              // Required: No
+            }
+        }
+
+        Note: At least one POS type must be set to true when formatting is enabled
+
+    Returns:
+        JSON response (200 OK):
+        {
+            "success": true,
+            "output_path": str,                   // Path to formatted document
+            "format": "docx",
+            "words_formatted": int,               // Total words formatted
+            "paragraphs_processed": int,          // Number of paragraphs processed
+            "pos_stats": {                        // Statistics per POS
+                "nouns": int,                     // Number of nouns formatted
+                "verbs": int,                     // Number of verbs formatted
+                "adjectives": int,                // Number of adjectives formatted
+                "adverbs": int                    // Number of adverbs formatted
+            },
+            "highlighting_options": {             // Options used
+                "enabled": bool,
+                "color": str,
+                "style": str,
+                "font_size": int,
+                "font_family": str,
+                "nouns": bool,
+                "verbs": bool,
+                "adjectives": bool,
+                "adverbs": bool
+            }
+        }
+
+    Raises:
+        ValidationException (400): If:
+            - Request body missing or malformed
+            - 'highlighting' field missing
+            - 'enabled' is false
+            - No POS types selected
+            - Invalid color format
+            - Invalid style value
+            - font_size out of range (6-72)
+            - document_id in invalid format
+
+        DocumentNotFoundException (404): If document doesn't exist
+
+        FormattingException (500): If processing error occurs
+
+    Example Request 1 - Format nouns in red, bold, Times New Roman:
+        PUT /documents/abc-123-def-456/highlighting
+        Content-Type: application/json
+
+        {
+            "highlighting": {
+                "enabled": true,
+                "color": "#FF0000",
+                "style": "bold",
+                "font_family": "Times New Roman",
+                "nouns": true,
+                "verbs": false,
+                "adjectives": false,
+                "adverbs": false
+            }
+        }
+
+    Example Request 2 - Format verbs in blue, italic, 14pt:
+        PUT /documents/abc-123-def-456/highlighting
+        Content-Type: application/json
+
+        {
+            "highlighting": {
+                "enabled": true,
+                "color": "#0000FF",
+                "style": "italic",
+                "font_size": 14,
+                "nouns": false,
+                "verbs": true,
+                "adjectives": false,
+                "adverbs": false
+            }
+        }
+
+    Example Request 3 - Format adjectives in green, bold+italic+underline, Courier New, 12pt:
+        PUT /documents/abc-123-def-456/highlighting
+        Content-Type: application/json
+
+        {
+            "highlighting": {
+                "enabled": true,
+                "color": "#00FF00",
+                "style": "bold,italic,underline",
+                "font_size": 12,
+                "font_family": "Courier New",
+                "nouns": false,
+                "verbs": false,
+                "adjectives": true,
+                "adverbs": false
+            }
+        }
+
+    Example Request 4 - Format all POS types with Open Sans, 16pt, bold:
+        PUT /documents/abc-123-def-456/highlighting
+        Content-Type: application/json
+
+        {
+            "highlighting": {
+                "enabled": true,
+                "color": "#800080",
+                "style": "bold",
+                "font_size": 16,
+                "font_family": "Open Sans",
+                "nouns": true,
+                "verbs": true,
+                "adjectives": true,
+                "adverbs": true
+            }
+        }
+
+    Example Response - Success:
+        {
+            "success": true,
+            "output_path": "/path/to/highlighted_20260301120000_document.docx",
+            "format": "docx",
+            "words_formatted": 145,
+            "paragraphs_processed": 23,
+            "pos_stats": {
+                "nouns": 67,
+                "verbs": 45,
+                "adjectives": 23,
+                "adverbs": 10
+            },
+            "highlighting_options": {
+                "enabled": true,
+                "color": "#FF0000",
+                "style": "bold",
+                "font_size": 12,
+                "font_family": "Times New Roman",
+                "nouns": true,
+                "verbs": false,
+                "adjectives": false,
+                "adverbs": false
+            }
+        }
+
+    Notes:
+        - Original document is not modified
+        - Creates new file with prefix "highlighted_" and timestamp
+        - Uses spaCy NLP for accurate POS tagging
+        - Preserves paragraph styles and alignment
+        - Text color is applied to the text itself, NOT as background highlight
+        - Font family must be installed on the system viewing the document
+        - Multiple styles can be combined using comma separation
+        - Supports only DOCX format currently
+        - POS identification accuracy depends on spaCy model quality
+        - Italian language model (it_core_news_lg) used by default
+
+    Performance:
+        - Processing time: ~0.5-2 seconds per paragraph
+        - Depends on document size and text complexity
+        - spaCy model loading is cached for efficiency
+
+    See Also:
+        - POST /documents/upload - Upload new document
+        - PUT /documents/{document_id}/keywords - Extract keywords
+        - PUT /documents/{document_id}/format - Apply general formatting
+        - GET /documents/{document_id}/download - Download processed document
+    """
+    logger.info(f"Part-of-speech text formatting requested for document {document_id}")
+
+    validate_document_id(document_id)
+
+    # Validate request data
+    data = request.get_json()
+    if not data:
+        raise ValidationException("Request body is required")
+
+    if 'highlighting' not in data:
+        raise ValidationException("'highlighting' field is required in request body")
+
+    validated_data = validate_schema(HighlightingOptionsSchema, data['highlighting'])
+
+    # Apply highlighting
+    document_service = get_document_service()
+    output_folder = current_app.config['OUTPUT_FOLDER']
+
+    result = document_service.apply_highlighting(
+        document_id=document_id,
+        highlighting_options=validated_data.dict(),
+        output_folder=output_folder
+    )
+
+    return jsonify(result), 200
+
+@documents_bp.route('/documents/<document_id>/styles', methods=['POST'])
 def get_document_styles(document_id: str):
     """
     Get available formatting styles for document.
@@ -473,7 +875,7 @@ def get_document_styles(document_id: str):
 
     return jsonify(styles), 200
 
-
+# FIXME: da ultimare
 @documents_bp.route('/documents/<document_id>/summarize', methods=['POST'])
 @limiter.limit("10 per minute")
 def summarize_document(document_id: str):
@@ -520,7 +922,7 @@ def summarize_document(document_id: str):
 
     return jsonify(result), 200
 
-
+# FIXME: da ultimare
 @documents_bp.route('/documents/<document_id>/paraphrase', methods=['POST'])
 @limiter.limit("10 per minute")
 def paraphrase_document(document_id: str):
@@ -569,7 +971,7 @@ def paraphrase_document(document_id: str):
 
     return jsonify(result), 200
 
-
+# FIXME: da ultimare
 @documents_bp.route('/text/summarize', methods=['POST'])
 @limiter.limit("10 per minute")
 def summarize_text():
@@ -607,7 +1009,7 @@ def summarize_text():
         'summary_length': len(summary)
     }), 200
 
-
+# FIXME: da ultimare
 @documents_bp.route('/text/paraphrase', methods=['POST'])
 @limiter.limit("10 per minute")
 def paraphrase_text():
@@ -646,7 +1048,7 @@ def paraphrase_text():
         'paraphrased_length': len(paraphrased)
     }), 200
 
-
+# FIXME: da ultimare
 @documents_bp.route('/documents/<document_id>/download', methods=['GET'])
 def download_document(document_id: str):
     """

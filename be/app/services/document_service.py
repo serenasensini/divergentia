@@ -284,6 +284,45 @@ class DocumentService:
 
         return result
 
+    def apply_highlighting(
+        self,
+        document_id: str,
+        highlighting_options: Dict[str, Any],
+        output_folder: str
+    ) -> Dict[str, Any]:
+        """
+        Apply part-of-speech highlighting to document.
+
+        Args:
+            document_id: Document ID
+            highlighting_options: Highlighting options (enabled, color, nouns, verbs, adjectives, adverbs)
+            output_folder: Folder to save processed document
+
+        Returns:
+            Dictionary with result information
+        """
+        logger.info(f"Applying part-of-speech highlighting to document {document_id}")
+
+        document = self.get_document(document_id)
+
+        # Generate output path with "highlighted_" prefix
+        timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        output_filename = f"highlighted_{timestamp}_{document['original_filename']}"
+        output_path = os.path.join(output_folder, output_filename)
+
+        # Apply highlighting
+        result = self.formatting_service.apply_highlighting(
+            document['file_path'],
+            output_path,
+            highlighting_options
+        )
+
+        # Update document record
+        document['formatted_path'] = output_path
+        document['modified_at'] = None  # Add timestamp in production
+
+        return result
+
 # FIXME include a percentage for needed summarization
     def summarize_document(
         self,

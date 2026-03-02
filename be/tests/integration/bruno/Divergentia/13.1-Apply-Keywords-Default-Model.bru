@@ -1,0 +1,59 @@
+meta {
+  name: Apply Keywords Extraction (Default Model)
+  type: http
+  seq: 14
+}
+
+post {
+  url: {{base_url}}/documents/{{document_id}}/keywords
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "keywords": {
+      "max_keywords": 5,
+      "include_proper_nouns": true
+    }
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.success: eq true
+  res.body.output_path: isDefined
+  res.body.format: eq docx
+  res.body.sections_processed: isDefined
+  res.body.total_keywords: isDefined
+}
+
+script:pre-request {
+  // Ensure we have a document_id from previous upload
+  const docId = bru.getVar("document_id");
+  if (!docId) {
+    throw new Error("document_id not found. Please upload a document first (03-Upload-Document)");
+  }
+}
+
+docs {
+  # Apply Keywords Extraction (Default Model)
+
+  Estrae le parole chiave utilizzando il modello Ollama di default configurato nel server.
+
+  ## Request
+  ```json
+  {
+    "keywords": {
+      "max_keywords": 5,        // Default: 5
+      "include_proper_nouns": true   // Default: true
+    }
+  }
+  ```
+
+  ## Notes
+  - Se il parametro `model` non è specificato, usa il modello di default del server
+  - Configurazione default: OLLAMA_MODEL environment variable o "llama2"
+  - Tutte le altre funzionalità sono identiche alla versione con modello specificato
+}
+

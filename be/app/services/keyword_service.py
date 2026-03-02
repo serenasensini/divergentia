@@ -2,7 +2,7 @@
 Keyword Extraction Service - Extract keywords from text using spaCy
 """
 import logging
-from typing import List, Set
+from typing import List, Dict
 from collections import Counter
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ class KeywordService:
         try:
             import spacy
             try:
-                self.nlp = spacy.load("it_core_news_lg-3.8.0")
+                self.nlp = spacy.load("it_core_news_lg")
                 logger.info("Italian spaCy model loaded successfully")
             except OSError:
                 logger.warning("Italian spaCy model not found. Attempting to download...")
@@ -30,6 +30,12 @@ class KeywordService:
                 subprocess.check_call([sys.executable, "-m", "spacy", "download", "it_core_news_lg-3.8.0"])
                 self.nlp = spacy.load("it_core_news_lg-3.8.0")
                 logger.info("Italian spaCy model downloaded and loaded successfully")
+
+            # Add sentencizer if not already in pipeline
+            if "sentencizer" not in self.nlp.pipe_names:
+                self.nlp.add_pipe("sentencizer")
+                logger.info("Sentencizer added to spaCy pipeline")
+
         except Exception as e:
             logger.error(f"Failed to load spaCy model: {str(e)}")
             raise Exception(f"Failed to initialize keyword service: {str(e)}")
@@ -98,6 +104,167 @@ class KeywordService:
 
         # Format as: "Parole chiave: keyword1, keyword2, keyword3"
         return f"Parole chiave: {', '.join(keywords)}"
+
+    def analyze_pos(self, text: str) -> List[Dict[str, str]]:
+        """
+        Analyze text and return part-of-speech information for each token.
+
+        Args:
+            text: Text to analyze
+
+        Returns:
+            List of dictionaries with token information (text, pos, lemma)
+        """
+        if not text or not text.strip():
+            logger.warning("Empty text provided for POS analysis")
+            return []
+
+        try:
+            doc = self.nlp(text)
+            tokens = []
+            for token in doc:
+                tokens.append({
+                    'text': token.text,
+                    'pos': token.pos_,
+                    'lemma': token.lemma_,
+                    'is_stop': token.is_stop,
+                    'is_punct': token.is_punct,
+                    'is_space': token.is_space
+                })
+            return tokens
+        except Exception as e:
+            logger.error(f"Error analyzing POS: {str(e)}")
+            return []
+
+    def is_noun(self, word: str) -> bool:
+        """
+        Check if a word is a noun.
+
+        Args:
+            word: Word to check
+
+        Returns:
+            True if word is a noun, False otherwise
+        """
+        if not word or not word.strip():
+            return False
+
+        try:
+            doc = self.nlp(word.strip())
+            for token in doc:
+                if not token.is_punct and not token.is_space:
+                    return token.pos_ in ["NOUN", "PROPN"]
+            return False
+        except Exception as e:
+            logger.error(f"Error checking if word is noun: {str(e)}")
+            return False
+
+    def is_verb(self, word: str) -> bool:
+        """
+        Check if a word is a verb.
+
+        Args:
+            word: Word to check
+
+        Returns:
+            True if word is a verb, False otherwise
+        """
+        if not word or not word.strip():
+            return False
+
+        try:
+            doc = self.nlp(word.strip())
+            for token in doc:
+                if not token.is_punct and not token.is_space:
+                    return token.pos_ == "VERB"
+            return False
+        except Exception as e:
+            logger.error(f"Error checking if word is verb: {str(e)}")
+            return False
+
+    def is_adjective(self, word: str) -> bool:
+        """
+        Check if a word is an adjective.
+
+        Args:
+            word: Word to check
+
+        Returns:
+            True if word is an adjective, False otherwise
+        """
+        if not word or not word.strip():
+            return False
+
+        try:
+            doc = self.nlp(word.strip())
+            for token in doc:
+                if not token.is_punct and not token.is_space:
+                    return token.pos_ == "ADJ"
+            return False
+        except Exception as e:
+            logger.error(f"Error checking if word is adjective: {str(e)}")
+            return False
+
+    def is_adverb(self, word: str) -> bool:
+        """
+        Check if a word is an adverb.
+
+        Args:
+            word: Word to check
+
+        Returns:
+            True if word is an adverb, False otherwise
+        """
+        if not word or not word.strip():
+            return False
+
+        try:
+            doc = self.nlp(word.strip())
+            for token in doc:
+                if not token.is_punct and not token.is_space:
+                    return token.pos_ == "ADV"
+            return False
+        except Exception as e:
+            logger.error(f"Error checking if word is adverb: {str(e)}")
+            return False
+
+    def split_sentences(self, text: str) -> List[str]:
+        """
+        Split text into sentences using spaCy's Sentencizer.
+
+        This is more accurate than regex-based splitting as it:
+        - Handles abbreviations correctly (e.g., "Dr.", "etc.")
+        - Recognizes sentence boundaries in complex punctuation
+        - Works with multiple languages
+        - Handles edge cases like quotes and parentheses
+
+        Args:
+            text: Text to split into sentences
+
+        Returns:
+            List of sentences as strings
+        """
+        if not text or not text.strip():
+            logger.debug("Empty text provided for sentence splitting")
+            return []
+
+        try:
+            # Process text with spaCy (including sentencizer)
+            doc = self.nlp(text)
+
+            # Extract sentences
+            sentences = [sent.text.strip() for sent in doc.sents if sent.text.strip()]
+
+            logger.debug(f"Split text into {len(sentences)} sentences")
+            return sentences
+
+        except Exception as e:
+            logger.error(f"Error splitting sentences: {str(e)}")
+            # Fallback to simple regex split if spaCy fails
+            logger.warning("Falling back to regex-based sentence splitting")
+            import re
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            return [s.strip() for s in sentences if s.strip()]
 
 
 # Singleton instance

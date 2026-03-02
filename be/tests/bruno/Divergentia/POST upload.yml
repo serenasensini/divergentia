@@ -1,0 +1,22 @@
+info:
+  name: POST upload
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{protocol}}://{{hostname}}:{{port}}/api/documents/upload"
+  body:
+    type: multipart-form
+    data:
+      - name: file
+        type: file
+        value:
+          - C:\Users\serena.sensini\WebstormProjects\divergentia\be\uploads\BOX_SEZIONI_PRIMA.docx
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

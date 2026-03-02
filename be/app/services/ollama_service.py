@@ -2,6 +2,7 @@
 Ollama Service - AI-powered text processing (Summarization & Paraphrasing)
 """
 import logging
+import re
 import time
 from typing import Dict, List, Optional, Any
 from functools import wraps
@@ -271,6 +272,125 @@ Paraphrased text:"""
         logger.info("Batch paraphrasing completed")
         return paraphrased_chunks
 
+    def extract_keywords(
+        self,
+        text: str,
+        max_keywords: int = 5,
+        model: Optional[str] = None,
+        use_cache: bool = True
+    ) -> List[str]:
+        """
+        Estrae le parole chiave più rilevanti da un testo utilizzando un modello Ollama.
+
+        Questa funzione invia un prompt in italiano al modello Ollama per identificare
+        le parole chiave più significative nel contesto del testo fornito. Il modello
+        analizza il contenuto semantico e restituisce una lista di parole chiave ordinate
+        per rilevanza.
+
+        Funzionalità:
+        - Utilizza un prompt ottimizzato in italiano
+        - Supporta la selezione di modelli specifici (es. llama2, mistral, phi)
+        - Implementa caching per migliorare le performance su richieste ripetute
+        - Effettua pulizia automatica della risposta (rimozione numerazione, conversione lowercase)
+        - Gestisce diversi formati di risposta dal modello
+
+        Flusso di esecuzione:
+        1. Verifica cache per risultati precedenti
+        2. Imposta il modello specificato (o usa quello di default)
+        3. Genera prompt in italiano con il testo da analizzare
+        4. Invia richiesta al modello Ollama
+        5. Parse e pulizia della risposta (rimozione prefissi, numerazione)
+        6. Conversione in lowercase e limitazione al numero richiesto
+        7. Salvataggio in cache e restituzione risultati
+
+        Args:
+            text (str): Testo da cui estrarre le parole chiave
+            max_keywords (int, optional): Numero massimo di parole chiave da estrarre (range: 1-10).
+                                         Default: 5
+            model (Optional[str], optional): Nome del modello Ollama specifico da utilizzare
+                                            (es. 'llama2', 'mistral', 'phi').
+                                            Se None, usa il modello configurato di default.
+                                            Default: None
+            use_cache (bool, optional): Se True, utilizza risultati in cache per richieste identiche.
+                                       Se False, forza una nuova richiesta al modello.
+                                       Default: True
+
+        Returns:
+            List[str]: Lista di parole chiave estratte in formato lowercase, ordinate per rilevanza.
+                      La lista conterrà al massimo 'max_keywords' elementi.
+                      Esempio: ['intelligenza', 'artificiale', 'apprendimento', 'dati', 'modello']
+
+        Raises:
+            OllamaConnectionException: Se la connessione al servizio Ollama fallisce
+            OllamaProcessingException: Se si verifica un errore durante l'elaborazione
+
+        Note:
+            - Il prompt richiede al modello di rispondere SOLO con parole chiave separate da virgola
+            - La funzione gestisce automaticamente risposte con formati diversi (numerazioni, prefissi)
+            - Per testi molto lunghi (>2000 caratteri), considera di suddividerli in chunk
+            - Il modello specificato deve essere già scaricato localmente (ollama pull <model>)
+        """
+        logger.info(f"Extracting {max_keywords} keywords from text using Ollama")
+
+        # Check cache
+        cache_key = self._get_cache_key('extract_keywords', text, max_keywords=max_keywords, model=model or self.model)
+        if use_cache and cache_key in self._cache:
+            logger.info("Returning cached keywords")
+            return self._cache[cache_key]
+
+        # Use specified model or default
+        original_model = self.model
+        if model:
+            self.model = model
+            logger.info(f"Using specific model for keyword extraction: {model}")
+
+        try:
+            prompt = f"""Estrai le {max_keywords} parole chiave più rilevanti da questo testo.
+                    Rispondi SOLO con le parole chiave separate da virgola, senza numerazione o spiegazioni. Le parole chiave devono essere nella lingua originale
+                    del testo riportato di seguito e rappresentare i concetti più importanti. Non includere stop words o parole comuni, ma solo termini significativi per il contenuto.
+                    Non usare sinonimi della stessa parola, ma scegli la forma più rappresentativa. Se il testo è troppo lungo, concentrati sulle sezioni più rilevanti.
+                    Usare per l'output solo la lingua originale del testo, senza traduzioni o adattamenti.
+                    
+                    Testo:
+                    {text}
+                    
+                    Parole chiave:"""
+            logger.debug(f"Prompt for keyword extraction: {prompt}")
+            response = self._generate_completion(prompt)
+            logger.debug(f"Raw response for keyword extraction: {response.strip()}")
+
+            # Parse response - expecting comma-separated keywords
+            keywords_text = response.strip()
+
+            # Remove common prefixes if present
+            keywords_text = re.sub(r'^(parole chiave:|keywords:|risposta:)\s*', '', keywords_text, flags=re.IGNORECASE)
+
+            # Split by comma and clean
+            keywords = [kw.strip() for kw in keywords_text.split(',') if kw.strip()]
+
+            # Additional cleaning - remove numbering if present
+            cleaned_keywords = []
+            for kw in keywords:
+                # Remove leading numbers and dots
+                clean_kw = re.sub(r'^\d+[.)]\s*', '', kw).strip()
+                if clean_kw:
+                    cleaned_keywords.append(clean_kw.lower())
+
+            # Ensure we don't exceed max_keywords
+            keywords = cleaned_keywords[:max_keywords]
+
+            # Cache result
+            if use_cache:
+                self._cache[cache_key] = keywords
+
+            logger.info(f"Extracted {len(keywords)} keywords: {keywords}")
+            return keywords
+
+        finally:
+            # Restore original model
+            if model:
+                self.model = original_model
+
     def get_key_points(
         self,
         text: str,
@@ -289,14 +409,19 @@ Paraphrased text:"""
         logger.info(f"Extracting {num_points} key points from text")
 
         prompt = f"""Please extract the {num_points} most important key points from the following text.
-Present each point as a clear, concise bullet point.
-
-Text:
-{text}
-
-Key points (one per line, numbered):"""
-
+                Present each point as a clear, concise bullet point. Use simple language and focus on the main ideas without unnecessary details.
+                The output should be a list of key points, each on a new line, without numbering or additional formatting, with
+                the same language as the input text and the same level of formality. Keywords shouldn't include stop words or common words, 
+                but should be relevant to the main topics of the text and they shouldn't include synonyms of the same word. If the text is too long, 
+                focus on the most relevant sections to extract key points.
+                
+                Text:
+                {text}
+                
+                Key points (one per line, numbered):"""
+        logger.debug(f"Prompt for key point extraction: {prompt}")
         response = self._generate_completion(prompt)
+        logger.debug(f"Extracted {num_points} key points: {response.strip()}")
 
         # Parse response into list
         lines = response.strip().split('\n')

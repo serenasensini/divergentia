@@ -215,6 +215,72 @@ class FormattingService:
             logger.error(f"Keyword extraction error: {str(e)}")
             raise FormattingException(f"Failed to apply keyword extraction: {str(e)}")
 
+    def apply_highlighting(
+        self,
+        input_path: str,
+        output_path: str,
+        highlighting_options: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Apply part-of-speech text formatting to document text.
+
+        Args:
+            input_path: Input file path
+            output_path: Output file path
+            highlighting_options: Dictionary with text formatting options
+                - enabled: bool - Enable text formatting
+                - color: str - Text color in hex format (e.g., "#FF0000")
+                - style: str - Text styles: 'bold', 'italic', 'underline', or combinations like 'bold,italic'
+                - font_size: int - Font size in points (6-72)
+                - font_family: str - Font family name (e.g., 'Times New Roman', 'Arial', 'Courier New')
+                - nouns: bool - Format nouns
+                - verbs: bool - Format verbs
+                - adjectives: bool - Format adjectives
+                - adverbs: bool - Format adverbs
+
+        Returns:
+            Result information including number of words formatted
+        """
+        logger.info(f"Applying part-of-speech text formatting to {input_path}")
+
+        # Determine file type
+        file_extension = Path(input_path).suffix.lower().lstrip('.')
+
+        if file_extension not in self.SUPPORTED_FORMATS:
+            raise FormattingException(
+                f"Unsupported file format: {file_extension}",
+                payload={'supported_formats': list(self.SUPPORTED_FORMATS.keys())}
+            )
+
+        # Check if highlighting is enabled
+        if not highlighting_options.get('enabled', False):
+            raise FormattingException("Text formatting is not enabled in the provided options")
+
+        # Validate at least one POS is selected
+        pos_selected = any([
+            highlighting_options.get('nouns', False),
+            highlighting_options.get('verbs', False),
+            highlighting_options.get('adjectives', False),
+            highlighting_options.get('adverbs', False)
+        ])
+
+        if not pos_selected:
+            raise FormattingException("At least one part of speech must be selected for text formatting")
+
+        # Apply highlighting based on file type
+        try:
+            if file_extension == 'docx':
+                logger.debug(f"Text formatting options received: {highlighting_options}")
+                return self._apply_highlighting_docx(input_path, output_path, highlighting_options)
+            elif file_extension == 'pdf':
+                raise FormattingException("PDF text formatting is not currently supported")
+            else:
+                raise FormattingException(f"Text formatting not supported for {file_extension}")
+
+        except Exception as e:
+            logger.error(f"Text formatting error: {str(e)}")
+            raise FormattingException(f"Failed to apply text formatting: {str(e)}")
+
     def _format_docx(
         self,
         input_path: str,
@@ -262,52 +328,6 @@ class FormattingService:
         try:
             doc = Document(input_path)
             paragraphs_modified = 0
-
-            # Extract formatting options about text styling
-            # font_name = options.get('font_name')
-            # font_size = options.get('font_size')
-            # font_color = options.get('font_color')
-            # bold = options.get('bold')
-            # italic = options.get('italic')
-            # alignment = options.get('alignment')
-            #
-            # # Apply to all paragraphs
-            # for paragraph in doc.paragraphs:
-            #     if not paragraph.runs:
-            #         continue
-            #
-            #     # Apply paragraph-level formatting
-            #     if alignment:
-            #         alignment_map = {
-            #             'left': WD_ALIGN_PARAGRAPH.LEFT,
-            #             'center': WD_ALIGN_PARAGRAPH.CENTER,
-            #             'right': WD_ALIGN_PARAGRAPH.RIGHT,
-            #             'justify': WD_ALIGN_PARAGRAPH.JUSTIFY
-            #         }
-            #         if alignment.lower() in alignment_map:
-            #             paragraph.alignment = alignment_map[alignment.lower()]
-            #
-            #     # Apply run-level formatting
-            #     for run in paragraph.runs:
-            #         if font_name:
-            #             run.font.name = font_name
-            #
-            #         if font_size:
-            #             run.font.size = Pt(int(font_size))
-            #
-            #         if font_color:
-            #             # Parse color (hex format: #RRGGBB)
-            #             color = self._parse_color(font_color)
-            #             if color:
-            #                 run.font.color.rgb = RGBColor(*color)
-            #
-            #         if bold is not None:
-            #             run.font.bold = bool(bold)
-            #
-            #         if italic is not None:
-            #             run.font.italic = bool(italic)
-            #
-            #     paragraphs_modified += 1
 
             # Apply formatting based on specific options (e.g. only to titles, paragraphs, etc.)
             logger.debug(f"Options received for formatting: {options}")
@@ -547,79 +567,145 @@ class FormattingService:
         # Add <w:br/> after the paragraph
         p.addnext(OxmlElement('w:br'))
 
-
-    def _add_sentence_spacing(self, sentence) -> None:
+    def _add_sentence_spacing(self, paragraph) -> None:
         """
-        Add spacing to a sentence (implemented as a run).
+        Add spacing between sentences in a paragraph using spaCy Sentencizer.
+
+        This method uses spaCy's Sentencizer for accurate sentence boundary detection,
+        which properly handles abbreviations, complex punctuation, and language-specific rules.
 
         Args:
-            sentence: python-docx run object representing the sentence
+            paragraph: python-docx paragraph object
         """
-        # Add spacing before the sentence
-        sentence.add_break()
-        # Add spacing after the sentence
-        sentence.add_break()
+        from app.services.keyword_service import get_keyword_service
+
+        text = paragraph.text
+        logger.debug(f"Adding sentence spacing to paragraph: '{text[:50]}...'")
+
+        if not text.strip():
+            return
+
+        # Use spaCy Sentencizer for accurate sentence splitting
+        keyword_service = get_keyword_service()
+        sentences = keyword_service.split_sentences(text)
+
+        logger.debug(f"Identified {len(sentences)} sentences for spacing")
+
+        if len(sentences) <= 1:
+            logger.debug("Only one sentence found, no spacing needed")
+            return  # No need to add breaks if there's only one sentence
+
+        # Clear existing runs while preserving paragraph properties
+        for run in paragraph.runs:
+            r = run._element
+            r.getparent().remove(r)
+
+        # Re-add sentences with line breaks between them
+        for i, sentence in enumerate(sentences):
+            logger.debug(f"Adding sentence {i+1}/{len(sentences)}: '{sentence[:30]}...'")
+            paragraph.add_run(sentence)
+
+            # Add line break after each sentence except the last one
+            if i < len(sentences) - 1:
+                paragraph.add_run().add_break()
+                paragraph.add_run().add_break()
+
+        logger.debug(f"Finished adding sentence spacing to paragraph")
 
 
     def _identify_sections(self, doc: Document) -> List[Tuple[int, int, str]]:
         """
-        Identifica sezioni usando multipli criteri:
-        - Pattern di testo (es. " A. ")
-        - Stili Word applicati
-        - Formattazione (grassetto, dimensione font)
+        Identifica sezioni nel documento. Una sezione è il testo che si trova tra due headings
+        (o dopo un heading fino alla fine del documento).
+
+        Un heading è identificato da:
+        - Stile "Heading" (qualsiasi livello)
+        - Font size >= 14.0 pt
+
+        Args:
+            doc: python-docx Document object
+
+        Returns:
+            Lista di tuple (start_index, end_index, section_text) dove:
+            - start_index: indice del primo paragrafo della sezione
+            - end_index: indice dell'ultimo paragrafo della sezione (prima del prossimo heading)
+            - section_text: testo completo della sezione
         """
         sections = []
         current_section_start = None
+        current_section_paragraphs = []
 
         logger.info('Identifying sections')
-
         logger.debug(f"Total paragraphs in document: {len(doc.paragraphs)}")
-        logger.debug("Paragraphs found:", doc.paragraphs)
 
         try:
             for i in range(len(doc.paragraphs)):
                 para = doc.paragraphs[i]
-                logger.debug("###############################")
-                logger.debug(f"Paragraph {i}: {para.text}")
-                text = para.text
-                logger.debug(f"Analyzing paragraph {i}: '{text[:30]}...'")
-                style_name = para.style.name
-                logger.debug(f"Style name: {style_name}")
+                text = para.text.strip()
 
-                # Criterio 1: Pattern di testo esistente
-                is_section_by_pattern = re.match(r'^\s+[A-Z]\.', text)
-                logger.debug(f"is_section_by_pattern: {is_section_by_pattern}")
-
-                # Criterio 2: Stile Heading
-                is_heading = 'Heading' in style_name
-                logger.debug(f"is_heading: {is_heading}")
-
-                # Criterio 3: Formattazione grassetto e dimensione
-                is_formatted_title = False
-                logger.debug(f"is_formatted_title: {is_formatted_title}")
-                if para.runs:
-                    first_run = para.runs[0]
-                    is_formatted_title = (
-                            first_run.font.bold and
-                            first_run.font.size and
-                            first_run.font.size.pt > 11
-                    )
-
-                # Determina se è inizio sezione
-                if is_section_by_pattern or is_heading or is_formatted_title:
-                    logger.debug("Identified section start")
+                if not text:
+                    # Paragrafo vuoto: se siamo in una sezione, lo aggiungiamo
                     if current_section_start is not None:
-                        sections.append((current_section_start, i - 1))
-                    current_section_start = i
+                        current_section_paragraphs.append(para.text)
+                    continue
 
-                # Chiudi sezione se termina con punto
-                elif current_section_start is not None and text.strip().endswith('.'):
-                    if i + 1 >= len(doc.paragraphs) or not doc.paragraphs[i + 1].text.strip():
-                        sections.append((current_section_start, i))
-                        current_section_start = None
+                logger.debug(f"Analyzing paragraph {i}: '{text[:50]}...'")
+
+                # Determina se questo paragrafo è un heading
+                style_name = para.style.name
+                is_heading = 'Heading' in style_name
+
+                # Controlla anche il font size se disponibile
+                font_size = None
+                try:
+                    if para.style.font.size:
+                        font_size = para.style.font.size.pt
+                except:
+                    # Se non c'è font size nello stile, proviamo nei run
+                    if para.runs:
+                        for run in para.runs:
+                            if run.font.size:
+                                font_size = run.font.size.pt
+                                break
+
+                is_large_font = font_size is not None and font_size >= 14.0
+
+                logger.debug(f"  Style: {style_name}, is_heading: {is_heading}, font_size: {font_size}, is_large_font: {is_large_font}")
+
+                # Un heading delimita le sezioni
+                if is_heading or is_large_font:
+                    logger.debug(f"  Found heading/delimiter at paragraph {i}")
+
+                    # Se c'era una sezione in corso, la chiudiamo
+                    if current_section_start is not None and current_section_paragraphs:
+                        section_text = '\n'.join(current_section_paragraphs)
+                        sections.append((current_section_start, i - 1, section_text))
+                        logger.debug(f"  Closed section: start={current_section_start}, end={i-1}, text_length={len(section_text)}")
+
+                    # Reset per eventuale nuova sezione
+                    current_section_start = None
+                    current_section_paragraphs = []
+                else:
+                    # Questo è testo normale: fa parte di una sezione
+                    if current_section_start is None:
+                        # Inizia una nuova sezione
+                        current_section_start = i
+                        logger.debug(f"  Started new section at paragraph {i}")
+
+                    current_section_paragraphs.append(para.text)
+
+            # Chiudi l'ultima sezione se presente
+            if current_section_start is not None and current_section_paragraphs:
+                section_text = '\n'.join(current_section_paragraphs)
+                sections.append((current_section_start, len(doc.paragraphs) - 1, section_text))
+                logger.debug(f"Closed final section: start={current_section_start}, end={len(doc.paragraphs)-1}, text_length={len(section_text)}")
+
+            logger.info(f"Identified {len(sections)} sections")
+            for idx, (start, end, text) in enumerate(sections):
+                logger.debug(f"Section {idx}: paragraphs {start}-{end}, text preview: '{text[:100]}...'")
 
         except Exception as e:
-            logger.error(f"Error identifying sections: {str(e)}")
+            logger.error(f"Error identifying sections: {str(e)}", exc_info=True)
 
         return sections
 
@@ -697,38 +783,50 @@ class FormattingService:
 
     def _identify_sentences(self, doc: Document) -> List[Tuple[int, List[str]]]:
         """
-        Identify sentences in document.
-        Sentences start with space + capital letter and end with punctuation.
+        Identify sentences in document using spaCy's Sentencizer.
+
+        This method uses spaCy's Sentencizer for accurate sentence boundary detection,
+        which handles:
+        - Abbreviations (e.g., "Dr.", "etc.", "es.")
+        - Complex punctuation (quotes, parentheses)
+        - Multiple languages
+        - Edge cases that regex patterns miss
 
         Args:
             doc: python-docx Document object
 
         Returns:
             List of tuples (paragraph_index, [sentences])
+            where each tuple contains the paragraph index and a list of sentence strings
         """
+        from app.services.keyword_service import get_keyword_service
+
         sentence_map = []
+        keyword_service = get_keyword_service()
 
         for i, para in enumerate(doc.paragraphs):
-            # If paragraph style is Heading, we skip sentence splitting as it's likely a title
+            # Skip headings as they're typically not sentence content
             if 'Heading' in para.style.name:
-                logger.debug(f"Skipping sentence identification for paragraph {i} as it is a Heading 1")
+                logger.debug(f"Skipping sentence identification for paragraph {i} (Heading style)")
                 continue
-            else:
-                text = para.text
-                logger.debug(f"Analyzing paragraph {i} for sentences: '{text[:30]}...'")
-                if not text.strip():
-                    continue
 
-            # Split into sentences (by period, exclamation, question mark followed by space)
-            sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', text)
-            sentences = [s.strip() for s in sentences if s.strip()]
+            text = para.text
+            if not text.strip():
+                continue
+
+            logger.debug(f"Analyzing paragraph {i} for sentences: '{text[:50]}...'")
+
+            # Use spaCy Sentencizer for accurate sentence splitting
+            sentences = keyword_service.split_sentences(text)
 
             if sentences:
-                logger.debug(f"Identified sentences in paragraph {i}: {sentences}")
+                logger.debug(f"Identified {len(sentences)} sentences in paragraph {i}")
+                logger.debug(f"  First sentence: '{sentences[0][:50]}...'")
                 sentence_map.append((i, sentences))
 
         total_sentences = sum(len(sents) for _, sents in sentence_map)
-        logger.info(f"Identified {total_sentences} sentences across {len(sentence_map)} paragraphs")
+        logger.info(f"Identified {total_sentences} sentences across {len(sentence_map)} paragraphs using spaCy Sentencizer")
+
         return sentence_map
 
     # Identify main title (Heading 1) - this is a special case for framing main title only
@@ -747,6 +845,7 @@ class FormattingService:
 
         for i, para in enumerate(doc.paragraphs):
             style_name = para.style.name
+            logger.debug(f"Analyzing paragraph {i} for main title: style='{style_name}', text='{para.text[:30]}...'")
             if 'Heading 1' in style_name:
                 title_indices.append(i)
 
@@ -824,28 +923,34 @@ class FormattingService:
         logger.info("Applying spacing to DOCX document")
 
         try:
-            # Apply spacing to sections, paragraphs, subparagraphs, sentences based on options
             doc = Document(input_path)
             spacing_applied = 0
+
             # Apply spacing based on options
             if spacing_options.get('paragraphs', False):
+                logging.debug(f"Identifying PARAGRAPHS for spacing application")
                 paragraphs = self._identify_paragraphs(doc)
                 for idx in paragraphs:
                     logger.debug(f"Applying spacing to paragraph {idx}: '{doc.paragraphs[idx].text[:30]}...'")
                     self._add_paragraph_spacing(doc.paragraphs[idx])
                     spacing_applied += 1
                 logger.info(f"Applied spacing to {len(paragraphs)} paragraphs")
+
             if spacing_options.get('sentences', False):
-                sentence_map = self._identify_sentences(doc)
-                for para_idx, sentences in sentence_map:
-                    if len(sentences) > 0:
-                        logger.debug(f"Applying spacing to paragraph {para_idx} with sentences: {sentences[:30]}...")
-                        self._add_paragraph_spacing(doc.paragraphs[para_idx])
-                        spacing_applied += 1
-                logger.info(f"Applied spacing to paragraphs containing sentences")
+                logger.debug(f"Identifying SENTENCES for spacing application")
+                sentences_to_process = self._identify_sentences(doc)
+                logger.debug(f"Sentences identified for spacing: {sentences_to_process[:3]} (showing first 3)")
+                # Process in reversed order to avoid index issues when modifying paragraphs
+                for para_idx, sentences in reversed(sentences_to_process):
+                    logger.debug(f"Applying sentence spacing to paragraph {para_idx} with sentences: {sentences[:3]} (showing first 3)")
+                    self._add_sentence_spacing(doc.paragraphs[para_idx])
+                    spacing_applied += 1
+                logger.info(f"Applied spacing to sentences in {len(sentences_to_process)} paragraphs")
+
             # Save document
             doc.save(output_path)
             logger.info(f"DOCX spacing completed: {spacing_applied} spacings applied")
+
             return {
                 'success': True,
                 'output_path': output_path,
@@ -853,6 +958,7 @@ class FormattingService:
                 'spacing_applied': spacing_applied,
                 'spacing_options': spacing_options
             }
+
         except Exception as e:
             logger.error(f"DOCX spacing error: {str(e)}")
             raise FormattingException(f"DOCX spacing failed: {str(e)}")
@@ -886,10 +992,10 @@ class FormattingService:
                 sections = self._identify_sections(doc)
                 logger.debug(f"Total sections identified: {len(sections)}")
                 logger.debug(f"Example of identified sections: {[(s[0], s[1]) for s in sections[:3]]}")
-                for start_idx, end_idx in sections:
+                for start_idx, end_idx, section_text in sections:
                     logger.debug("Applying border to section from paragraph index {} to {}".format(start_idx, end_idx))
                     for idx in range(start_idx, end_idx + 1):
-                        logger.debug(f"Applying border to paragraph {idx}: '{doc.paragraphs[idx].text}...'")
+                        logger.debug(f"Applying border to paragraph {idx}: '{doc.paragraphs[idx].text[:50]}...'")
                         self._add_paragraph_border(doc.paragraphs[idx])
                         borders_applied += 1
                 logger.info(f"Applied borders to {len(sections)} sections")
@@ -914,12 +1020,10 @@ class FormattingService:
                 sentence_map = self._identify_sentences(doc)
                 logger.debug(f"Sentence map example: {sentence_map[:3]}")
                 # Apply border to each sentence
-
                 for para_idx, sentences in sentence_map:
                     logger.debug(f"Applying sentence borders to paragraph {para_idx} with sentences: {sentences[:3]}")
                     if len(sentences) > 0:
-                        self._add
-                        # self._add_paragraph_border(doc.paragraphs[para_idx])
+                        self._add_paragraph_border(doc.paragraphs[para_idx])
                         borders_applied += 1
                 logger.info(f"Applied borders to paragraphs containing sentences")
 
@@ -1017,102 +1121,231 @@ class FormattingService:
         keyword_options: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Extract keywords from document sections and add them as initial paragraphs.
+        Estrae parole chiave dalle sezioni di un documento DOCX e le inserisce come paragrafi formattati.
+
+        Questa funzione analizza un documento DOCX per identificare le sezioni strutturali
+        (tramite _identify_sections) e per ciascuna estrae le parole chiave più rilevanti
+        utilizzando Ollama come metodo principale, con fallback automatico a spaCy in caso
+        di indisponibilità del servizio o errori.
+
+        Flusso di esecuzione:
+        1. Caricamento del documento DOCX
+        2. Identificazione delle sezioni tramite _identify_sections() che rileva:
+           - Pattern di testo (es. " A.", " B.")
+           - Stili Heading (Heading 2, 3, etc.)
+           - Formattazione speciale (grassetto + font > 11pt)
+        3. Per ogni sezione identificata:
+           a. Estrazione del testo combinato di tutti i paragrafi della sezione
+           b. Tentativo di estrazione keywords con Ollama (metodo principale)
+           c. In caso di fallimento, utilizzo di spaCy come fallback
+           d. Formattazione delle keywords: "Parole chiave: keyword1, keyword2, ..."
+           e. Inserimento come nuovo paragrafo formattato dopo il titolo della sezione
+        4. Salvataggio del documento modificato
+        5. Restituzione metadati completi sull'operazione
+
+        Formattazione delle keywords inserite:
+        - Stile: Italico
+        - Dimensione font: 10pt (20 half-points in OpenXML)
+        - Posizione: Subito dopo il titolo della sezione
+        - Formato testo: "Parole chiave: parola1, parola2, parola3"
+
+        Gestione errori e fallback:
+        - Se Ollama non è disponibile: usa spaCy per tutte le sezioni
+        - Se Ollama fallisce per una sezione specifica: usa spaCy per quella sezione
+        - Se nessuna sezione è identificata: salva documento invariato e restituisce warning
+        - Ogni errore viene loggato con dettagli per debugging
 
         Args:
-            input_path: Input file path
-            output_path: Output file path
-            keyword_options: Dictionary with keyword extraction options
+            input_path (str): Percorso assoluto del file DOCX di input
+            output_path (str): Percorso assoluto dove salvare il file DOCX processato
+            keyword_options (Dict[str, Any]): Dizionario con opzioni di estrazione:
+                - max_keywords (int): Numero di parole chiave per sezione (range: 1-10).
+                                     Default: 5
+                - include_proper_nouns (bool): Include nomi propri nell'estrazione
+                                               (utilizzato solo dal fallback spaCy).
+                                               Default: True
+                - model (str, optional): Nome del modello Ollama specifico da utilizzare
+                                        (es. 'llama2', 'mistral', 'phi').
+                                        Se omesso, usa il modello di default configurato.
+                                        Default: None
 
         Returns:
-            Result information including number of sections processed
+            Dict[str, Any]: Dizionario con informazioni dettagliate sul risultato:
+                {
+                    'success': bool,                    # True se operazione completata
+                    'output_path': str,                 # Path del file generato
+                    'format': str,                      # Formato documento ('docx')
+                    'sections_processed': int,          # Numero di sezioni processate
+                    'total_keywords': int,              # Totale keywords estratte
+                    'keyword_options': Dict[str, Any],  # Opzioni utilizzate
+                    'extraction_method': str,           # Metodo usato: 'Ollama', 'spaCy',
+                                                       # o 'Ollama with spaCy fallback'
+                    'ollama_used': bool,               # True se Ollama è stato usato
+                    'spacy_fallback_used': bool        # True se fallback è stato attivato
+                }
+
+                In caso di nessuna sezione trovata, include anche:
+                    'note': str                        # Messaggio descrittivo
+
+        Raises:
+            FormattingException: Se si verifica un errore durante:
+                - Caricamento del documento
+                - Elaborazione delle sezioni
+                - Salvataggio del file
+                - Qualsiasi altro errore di processing
         """
         logger.info("Applying keyword extraction to DOCX document")
 
         try:
             from app.services.keyword_service import get_keyword_service
+            from app.services.ollama_service import get_ollama_service
 
             # Load document
             doc = Document(input_path)
-            keyword_service = get_keyword_service()
 
             # Get options
             max_keywords = keyword_options.get('max_keywords', 5)
             include_proper_nouns = keyword_options.get('include_proper_nouns', True)
+            ollama_model = keyword_options.get('model', None)
 
             sections_processed = 0
             total_keywords_extracted = 0
+            ollama_used = False
+            spacy_fallback_used = False
 
-            # Identify sections and their content
-            # A section is defined by a heading (Heading 2, 3, etc.) followed by content paragraphs
-            i = 0
-            while i < len(doc.paragraphs):
-                para = doc.paragraphs[i]
-                style_name = para.style.name
+            # Identify sections using the advanced method
+            sections = self._identify_sections(doc)
+            logger.info(f"Identified {len(sections)} sections for keyword extraction")
 
-                # Check if this is a section heading (Heading 2, 3, 4, etc. but not Heading 1)
-                is_section_heading = 'Heading' in style_name and style_name != 'Heading 1'
+            if not sections:
+                logger.warning("No sections identified in document")
+                doc.save(output_path)
+                return {
+                    'success': True,
+                    'output_path': output_path,
+                    'format': 'docx',
+                    'sections_processed': 0,
+                    'total_keywords': 0,
+                    'keyword_options': keyword_options,
+                    'note': 'No sections found in document'
+                }
 
-                if is_section_heading:
-                    logger.debug(f"Found section heading at index {i}: '{para.text[:50]}...'")
+            # Try to get Ollama service
+            ollama_service = None
+            try:
+                ollama_service = get_ollama_service()
+                use_ollama = True
+                logger.info("Ollama service available, will use for keyword extraction")
+            except Exception as e:
+                use_ollama = False
+                logger.warning(f"Ollama service not available: {str(e)}. Will use spaCy fallback")
 
-                    # Collect text from all paragraphs in this section until the next heading
-                    section_text = []
-                    j = i + 1
+            # Get spaCy service as fallback
+            keyword_service = get_keyword_service()
 
-                    while j < len(doc.paragraphs):
-                        next_para = doc.paragraphs[j]
-                        next_style = next_para.style.name
+            logger.debug("Starting section processing loop")
+            logger.debug("#################################")
+            logger.debug(f"Sections to process: {len(sections)}")
+            logger.debug(f"Sections identified: {[(s[0], s[1]) for s in sections]}")
+            logger.debug("#################################")
 
-                        # Stop if we hit another heading
-                        if 'Heading' in next_style:
-                            break
+            # IMPORTANTE: Process sections in REVERSE order to avoid index shift problems
+            # When we insert a paragraph before a section, all subsequent paragraph indices shift by +1
+            # By processing from the last section to the first, we ensure that:
+            # - Inserting keywords in section N doesn't affect the indices of sections 0..N-1
+            # - The indices remain valid throughout the entire processing loop
+            logger.info(f"Processing {len(sections)} sections in REVERSE order to preserve paragraph indices")
 
-                        # Add paragraph text if not empty
-                        if next_para.text.strip():
-                            section_text.append(next_para.text)
+            # Process each section (in reverse order)
+            for section_num, (start_idx, end_idx, section_text) in enumerate(reversed(sections), 1):
+                actual_section_num = len(sections) - section_num + 1  # For logging
+                logger.debug(f"Processing section {actual_section_num}/{len(sections)}: paragraphs {start_idx}-{end_idx}")
 
-                        j += 1
+                # Get the first paragraph of the section to use as title for logging
+                first_para = doc.paragraphs[start_idx].text
+                logger.debug(f"Section starts with: '{first_para[:50]}...'")
 
-                    # Extract keywords from section text
-                    if section_text:
-                        combined_text = ' '.join(section_text)
-                        keywords = keyword_service.extract_keywords(
-                            combined_text,
+                if not section_text.strip():
+                    logger.debug(f"Section {start_idx}-{end_idx} has no text, skipping")
+                    continue
+
+                # Extract keywords using Ollama or spaCy
+                keywords = []
+
+                if use_ollama:
+                    try:
+                        keywords = ollama_service.extract_keywords(
+                            text=section_text,
                             max_keywords=max_keywords,
-                            include_proper_nouns=include_proper_nouns
+                            model=ollama_model,
+                            use_cache=True
                         )
+                        ollama_used = True
+                        logger.debug(f"Ollama extracted keywords: {keywords}")
+                    except Exception as e:
+                        logger.warning(f"Ollama keyword extraction failed: {str(e)}. Falling back to spaCy")
+                        use_ollama = False  # Disable for remaining sections
 
-                        if keywords:
-                            # Format keywords
-                            keyword_text = keyword_service.format_keywords(keywords)
-                            logger.debug(f"Extracted keywords for section '{para.text[:30]}...': {keyword_text}")
+                # Fallback to spaCy if Ollama failed or not available
+                if not keywords:
+                    keywords = keyword_service.extract_keywords(
+                        text=section_text,
+                        max_keywords=max_keywords,
+                        include_proper_nouns=include_proper_nouns
+                    )
+                    spacy_fallback_used = True
+                    logger.debug(f"spaCy extracted keywords: {keywords}")
 
-                            # Insert keyword paragraph right after the heading
-                            # We need to insert at position i+1
-                            new_para = para._element.addnext(
-                                doc.add_paragraph(keyword_text)._element
-                            )
+                if keywords:
+                    # Format keywords using keyword_service
+                    # This returns: "Parole chiave: keyword1, keyword2, keyword3"
+                    keyword_text = keyword_service.format_keywords(keywords)
+                    logger.debug(f"Formatted keywords for section '{first_para[:30]}...': {keyword_text}")
 
-                            # Apply italic style to the keyword paragraph
-                            keyword_para = doc.paragraphs[i + 1]
-                            for run in keyword_para.runs:
-                                run.italic = True
-                                run.font.size = Pt(10)
+                    # Insert keyword paragraph right after the section start
+                    start_para = doc.paragraphs[start_idx]
 
-                            sections_processed += 1
-                            total_keywords_extracted += len(keywords)
+                    # Create new paragraph element
+                    new_para_element = OxmlElement('w:p')
 
-                            # Skip the newly inserted paragraph
-                            i += 1
+                    # Create run element with formatting properties
+                    run_element = OxmlElement('w:r')
 
-                i += 1
+                    # Apply formatting: italic and 10pt font
+                    rPr = OxmlElement('w:rPr')
+                    italic = OxmlElement('w:i')
+                    sz = OxmlElement('w:sz')
+                    sz.set(qn('w:val'), '20')  # 10pt = 20 half-points
+                    rPr.append(italic)
+                    rPr.append(sz)
+                    run_element.append(rPr)
+
+                    # Create text element with keyword text
+                    text_element = OxmlElement('w:t')
+                    text_element.text = keyword_text
+                    run_element.append(text_element)
+
+                    # Add run to paragraph
+                    new_para_element.append(run_element)
+
+                    # Insert the new paragraph before the section title
+                    start_para._element.addprevious(new_para_element)
+
+                    sections_processed += 1
+                    total_keywords_extracted += len(keywords)
+
+                    logger.info(f"Added keywords before section '{first_para[:50]}...': {keyword_text}")
 
             # Save document
             doc.save(output_path)
 
+            # Prepare result metadata
+            extraction_method = "Ollama" if ollama_used else "spaCy"
+            if ollama_used and spacy_fallback_used:
+                extraction_method = "Ollama with spaCy fallback"
+
             logger.info(f"DOCX keyword extraction completed: {sections_processed} sections processed, "
-                       f"{total_keywords_extracted} keywords extracted")
+                       f"{total_keywords_extracted} keywords extracted using {extraction_method}")
 
             return {
                 'success': True,
@@ -1120,12 +1353,250 @@ class FormattingService:
                 'format': 'docx',
                 'sections_processed': sections_processed,
                 'total_keywords': total_keywords_extracted,
-                'keyword_options': keyword_options
+                'keyword_options': keyword_options,
+                'extraction_method': extraction_method,
+                'ollama_used': ollama_used,
+                'spacy_fallback_used': spacy_fallback_used
             }
 
         except Exception as e:
             logger.error(f"DOCX keyword extraction error: {str(e)}")
             raise FormattingException(f"DOCX keyword extraction failed: {str(e)}")
+
+    def _apply_highlighting_docx(
+        self,
+        input_path: str,
+        output_path: str,
+        highlighting_options: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Apply part-of-speech text formatting to DOCX document.
+
+        This method processes each paragraph in the document, analyzes the text using spaCy
+        to identify parts of speech, and applies formatting (color, font, style) based on
+        user-specified options.
+
+        Args:
+            input_path: Path to input DOCX file
+            output_path: Path to save output DOCX file
+            highlighting_options: Dictionary containing:
+                - enabled: bool - Whether formatting is enabled
+                - color: str - Text color in hex format (e.g., "#FF0000")
+                - style: str - Text styles: 'bold', 'italic', 'underline', or combinations like 'bold,italic'
+                - font_size: int - Font size in points (6-72)
+                - font_family: str - Font family name (e.g., 'Times New Roman', 'Arial')
+                - nouns: bool - Whether to format nouns
+                - verbs: bool - Whether to format verbs
+                - adjectives: bool - Whether to format adjectives
+                - adverbs: bool - Whether to format adverbs
+
+        Returns:
+            Dictionary with result information:
+                - success: bool - Whether operation succeeded
+                - output_path: str - Path to output file
+                - format: str - File format ("docx")
+                - words_formatted: int - Total words formatted
+                - paragraphs_processed: int - Number of paragraphs processed
+                - pos_stats: dict - Statistics per part of speech
+                - highlighting_options: dict - Options used
+
+        Raises:
+            FormattingException: If document processing fails
+        """
+        logger.info("Applying part-of-speech text formatting to DOCX document")
+
+        try:
+            from app.services.keyword_service import get_keyword_service
+
+            # Load document
+            doc = Document(input_path)
+
+            # Get keyword service for POS analysis
+            keyword_service = get_keyword_service()
+
+            # Identify sections (this excludes headings)
+            sections = self._identify_sections(doc)
+
+            if not sections:
+                logger.warning("No sections found in document. Nothing to format.")
+                return {
+                    'success': True,
+                    'output_path': output_path,
+                    'format': 'docx',
+                    'words_formatted': 0,
+                    'paragraphs_processed': 0,
+                    'pos_stats': {'nouns': 0, 'verbs': 0, 'adjectives': 0, 'adverbs': 0},
+                    'highlighting_options': highlighting_options
+                }
+
+            # Extract options
+            color = highlighting_options.get('color', '#000000').lstrip('#')
+            style_str = highlighting_options.get('style', None)
+            font_size = highlighting_options.get('font_size', None)
+            font_family = highlighting_options.get('font_family', None)
+            highlight_nouns = highlighting_options.get('nouns', False)
+            highlight_verbs = highlighting_options.get('verbs', False)
+            highlight_adjectives = highlighting_options.get('adjectives', False)
+            highlight_adverbs = highlighting_options.get('adverbs', False)
+
+            # Parse styles
+            apply_bold = False
+            apply_italic = False
+            apply_underline = False
+            if style_str:
+                styles = [s.strip().lower() for s in style_str.split(',')]
+                apply_bold = 'bold' in styles
+                apply_italic = 'italic' in styles
+                apply_underline = 'underline' in styles
+
+            # Convert hex color to RGB
+            try:
+                r = int(color[0:2], 16)
+                g = int(color[2:4], 16)
+                b = int(color[4:6], 16)
+            except ValueError:
+                logger.warning(f"Invalid color format: {color}, using default black")
+                r, g, b = 0, 0, 0
+
+            # Statistics
+            words_formatted = 0
+            paragraphs_processed = 0
+            pos_stats = {
+                'nouns': 0,
+                'verbs': 0,
+                'adjectives': 0,
+                'adverbs': 0
+            }
+
+            logger.info(f"Processing document with color RGB({r}, {g}, {b})")
+            logger.info(f"Font settings - Family: {font_family}, Size: {font_size}, Styles: bold={apply_bold}, italic={apply_italic}, underline={apply_underline}")
+            logger.info(f"POS to format - Nouns: {highlight_nouns}, Verbs: {highlight_verbs}, "
+                       f"Adjectives: {highlight_adjectives}, Adverbs: {highlight_adverbs}")
+            logger.info(f"Found {len(sections)} sections to process")
+
+            # Build a set of paragraph indices that are part of sections (not headings)
+            section_paragraph_indices = set()
+            for start_idx, end_idx, _ in sections:
+                for i in range(start_idx, end_idx + 1):
+                    section_paragraph_indices.add(i)
+
+            logger.info(f"Processing {len(section_paragraph_indices)} paragraphs (excluding headings)")
+
+            # Process only paragraphs that are part of sections
+            for para_idx, paragraph in enumerate(doc.paragraphs):
+                # Skip if this paragraph is not part of a section (it's likely a heading)
+                if para_idx not in section_paragraph_indices:
+                    logger.debug(f"Skipping paragraph {para_idx} (heading or non-section content)")
+                    continue
+
+                if not paragraph.text.strip():
+                    continue
+
+                paragraphs_processed += 1
+
+                # Analyze text with spaCy
+                tokens = keyword_service.analyze_pos(paragraph.text)
+
+                if not tokens:
+                    continue
+
+                # Store original formatting
+                original_style = paragraph.style
+                original_alignment = paragraph.alignment
+
+                # Build a mapping of which tokens to format
+                format_map = []
+                for token in tokens:
+                    should_format = False
+
+                    if token['is_punct'] or token['is_space']:
+                        format_map.append(False)
+                        continue
+
+                    pos = token['pos']
+
+                    if highlight_nouns and pos in ['NOUN', 'PROPN']:
+                        should_format = True
+                        pos_stats['nouns'] += 1
+                    elif highlight_verbs and pos == 'VERB':
+                        should_format = True
+                        pos_stats['verbs'] += 1
+                    elif highlight_adjectives and pos == 'ADJ':
+                        should_format = True
+                        pos_stats['adjectives'] += 1
+                    elif highlight_adverbs and pos == 'ADV':
+                        should_format = True
+                        pos_stats['adverbs'] += 1
+
+                    format_map.append(should_format)
+                    if should_format:
+                        words_formatted += 1
+
+                # Clear existing runs and rebuild with formatting
+                for run in paragraph.runs:
+                    run._element.getparent().remove(run._element)
+
+                # Reconstruct text with formatting
+                for i, token in enumerate(tokens):
+                    if token['is_space']:
+                        # Skip pure whitespace tokens
+                        continue
+
+                    # Create new run
+                    run = paragraph.add_run(token['text'])
+
+                    # Apply formatting if needed
+                    if i < len(format_map) and format_map[i]:
+                        # Apply text color
+                        run.font.color.rgb = RGBColor(r, g, b)
+
+                        # Apply font family
+                        if font_family:
+                            run.font.name = font_family
+
+                        # Apply font size
+                        if font_size:
+                            run.font.size = Pt(font_size)
+
+                        # Apply text styles
+                        if apply_bold:
+                            run.bold = True
+                        if apply_italic:
+                            run.italic = True
+                        if apply_underline:
+                            run.underline = True
+
+                    # Add space after token if it's not punctuation and not the last token
+                    if not token['is_punct'] and i < len(tokens) - 1:
+                        next_token = tokens[i + 1] if i + 1 < len(tokens) else None
+                        if next_token and not next_token['is_punct']:
+                            paragraph.add_run(' ')
+
+                # Restore paragraph formatting
+                paragraph.style = original_style
+                if original_alignment:
+                    paragraph.alignment = original_alignment
+
+            # Save document
+            doc.save(output_path)
+
+            logger.info(f"DOCX text formatting completed: {paragraphs_processed} paragraphs processed, "
+                       f"{words_formatted} words formatted")
+            logger.info(f"POS statistics: {pos_stats}")
+
+            return {
+                'success': True,
+                'output_path': output_path,
+                'format': 'docx',
+                'words_formatted': words_formatted,
+                'paragraphs_processed': paragraphs_processed,
+                'pos_stats': pos_stats,
+                'highlighting_options': highlighting_options
+            }
+
+        except Exception as e:
+            logger.error(f"DOCX text formatting error: {str(e)}")
+            raise FormattingException(f"DOCX text formatting failed: {str(e)}")
 
     def get_available_styles(self, file_format: str) -> Dict[str, Any]:
         """

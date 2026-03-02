@@ -1,0 +1,8 @@
+name: Local
+variables:
+  - name: protocol
+    value: http
+  - name: hostname
+    value: localhost
+  - name: port
+    value: "5000"

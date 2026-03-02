@@ -49,6 +49,9 @@
   "highlighting": {
     "enabled": false,
     "color": "#FFFF00",
+    "style": "bold",
+    "font_size": 0,
+    "font_family": "Times New Roman",
     "nouns": false,
     "verbs": false,
     "adjectives": false,
