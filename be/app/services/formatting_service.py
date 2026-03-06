@@ -24,7 +24,7 @@ class FormattingService:
 
     SUPPORTED_FORMATS = {
         'docx': ['font_name', 'font_size', 'font_color', 'bold', 'italic', 'alignment', 'framing'],
-        'pdf': ['font_name', 'font_size', 'font_color', 'framing'],  # Limited PDF support
+        'pdf': [],  # Limited PDF support
         'txt': []  # Plain text has no formatting
     }
 
@@ -36,6 +36,93 @@ class FormattingService:
     def __init__(self):
         """Initialize formatting service"""
         logger.info("Formatting service initialized")
+
+    def _is_heading(self, para, check_font_size: bool = True, font_size_threshold: float = 14.0) -> bool:
+        """
+        Check if a paragraph is a heading based on style and optionally font size.
+
+        A paragraph is considered a heading if:
+        - Its style name contains 'Heading', OR
+        - Its font size is greater than the threshold (if check_font_size is True)
+
+        Args:
+            para: python-docx paragraph object
+            check_font_size: Whether to check font size in addition to style (default: True)
+            font_size_threshold: Font size threshold in points (default: 14.0)
+
+        Returns:
+            bool: True if paragraph is a heading, False otherwise
+        """
+        style_name = para.style.name
+
+        # Check if style contains 'Heading'
+        if 'Heading' in style_name:
+            return True
+
+        # Optionally check font size
+        if check_font_size:
+            font_size = self._get_paragraph_font_size(para)
+            if font_size is not None and font_size > font_size_threshold:
+                return True
+
+        return False
+
+    def _is_main_title(self, para) -> bool:
+        """
+        Check if a paragraph is a main title (Heading 1).
+
+        Args:
+            para: python-docx paragraph object
+
+        Returns:
+            bool: True if paragraph is a main title, False otherwise
+        """
+        style_name = para.style.name
+        return 'Heading 1' in style_name
+
+    def _is_section_heading(self, para) -> bool:
+        """
+        Check if a paragraph is a section heading (Heading 2, 3, 4, etc. but not Heading 1).
+
+        Args:
+            para: python-docx paragraph object
+
+        Returns:
+            bool: True if paragraph is a section heading, False otherwise
+        """
+        style_name = para.style.name
+        return 'Heading' in style_name and 'Heading 1' not in style_name
+
+    def _get_paragraph_font_size(self, para) -> Optional[float]:
+        """
+        Get the font size of a paragraph in points.
+
+        Checks both the paragraph style and individual runs to find the font size.
+
+        Args:
+            para: python-docx paragraph object
+
+        Returns:
+            Optional[float]: Font size in points, or None if not found
+        """
+        try:
+            # First try to get font size from style
+            if para.style.font.size:
+                logger.debug(f"Paragraph style font size found: {para.style.font.size.pt} pt")
+                return para.style.font.size.pt
+        except (AttributeError, TypeError):
+            pass
+
+        # Fall back to checking runs
+        for run in para.runs:
+            try:
+                if run.font.size:
+                    logger.debug(f"Run font size found: {run.font.size.pt} pt")
+                    return run.font.size.pt
+            except (AttributeError, TypeError):
+                continue
+
+        return None
 
     def apply_formatting(
         self,
@@ -653,27 +740,13 @@ class FormattingService:
 
                 # Determina se questo paragrafo è un heading
                 style_name = para.style.name
-                is_heading = 'Heading' in style_name
+                is_heading = self._is_heading(para, check_font_size=True, font_size_threshold=14.0)
+                font_size = self._get_paragraph_font_size(para)
 
-                # Controlla anche il font size se disponibile
-                font_size = None
-                try:
-                    if para.style.font.size:
-                        font_size = para.style.font.size.pt
-                except:
-                    # Se non c'è font size nello stile, proviamo nei run
-                    if para.runs:
-                        for run in para.runs:
-                            if run.font.size:
-                                font_size = run.font.size.pt
-                                break
-
-                is_large_font = font_size is not None and font_size >= 14.0
-
-                logger.debug(f"  Style: {style_name}, is_heading: {is_heading}, font_size: {font_size}, is_large_font: {is_large_font}")
+                logger.debug(f"  Style: {style_name}, is_heading: {is_heading}, font_size: {font_size}")
 
                 # Un heading delimita le sezioni
-                if is_heading or is_large_font:
+                if is_heading:
                     logger.debug(f"  Found heading/delimiter at paragraph {i}")
 
                     # Se c'era una sezione in corso, la chiudiamo
@@ -724,10 +797,8 @@ class FormattingService:
         in_paragraph_section = False
 
         for i, para in enumerate(doc.paragraphs):
-            style_name = para.style.name
-
             # Check if this is a section heading (Heading 2, 3, 4, etc. but not Heading 1)
-            is_section_heading = 'Heading' in style_name and 'Heading 1' not in style_name
+            is_section_heading = self._is_section_heading(para)
 
             if is_section_heading:
                 # We found a section heading, the next paragraphs will be part of this section
@@ -736,7 +807,7 @@ class FormattingService:
                 continue
 
             # Check if this is a main title (Heading 1) - this ends the current paragraph section
-            if 'Heading 1' in style_name:
+            if self._is_main_title(para):
                 in_paragraph_section = False
                 logger.debug(f"Found main title at index {i}, ending paragraph section")
                 continue
@@ -806,7 +877,7 @@ class FormattingService:
 
         for i, para in enumerate(doc.paragraphs):
             # Skip headings as they're typically not sentence content
-            if 'Heading' in para.style.name:
+            if self._is_heading(para, check_font_size=False):
                 logger.debug(f"Skipping sentence identification for paragraph {i} (Heading style)")
                 continue
 
@@ -846,7 +917,7 @@ class FormattingService:
         for i, para in enumerate(doc.paragraphs):
             style_name = para.style.name
             logger.debug(f"Analyzing paragraph {i} for main title: style='{style_name}', text='{para.text[:30]}...'")
-            if 'Heading 1' in style_name:
+            if self._is_main_title(para):
                 title_indices.append(i)
 
         logger.info(f"Identified {len(title_indices)} titles")
@@ -868,8 +939,7 @@ class FormattingService:
         title_indices = []
 
         for i, para in enumerate(doc.paragraphs):
-            style_name = para.style.name
-            if 'Heading' in style_name and 'Heading 1' not in style_name:
+            if self._is_section_heading(para):
                 title_indices.append(i)
 
         logger.info(f"Identified {len(title_indices)} titles")
@@ -1430,7 +1500,7 @@ class FormattingService:
                 }
 
             # Extract options
-            color = highlighting_options.get('color', '#000000').lstrip('#')
+            color = highlighting_options.get('color', '#cc5500').lstrip('#')
             style_str = highlighting_options.get('style', None)
             font_size = highlighting_options.get('font_size', None)
             font_family = highlighting_options.get('font_family', None)
@@ -1500,17 +1570,48 @@ class FormattingService:
                 if not tokens:
                     continue
 
-                # Store original formatting
+                # Store paragraph-level formatting
                 original_style = paragraph.style
                 original_alignment = paragraph.alignment
 
-                # Build a mapping of which tokens to format
+                # Map original formatting for each character position in the paragraph
+                # This preserves the exact formatting of each word as it was originally
+                char_formatting_map = {}
+                current_pos = 0
+
+                for run in paragraph.runs:
+                    run_length = len(run.text)
+                    run_formatting = {
+                        'font_name': run.font.name,
+                        'font_size': run.font.size,
+                        'font_color': run.font.color.rgb if run.font.color.rgb else None,
+                        'bold': run.bold,
+                        'italic': run.italic,
+                        'underline': run.underline
+                    }
+
+                    # Store formatting for each character in this run
+                    for offset in range(run_length):
+                        char_formatting_map[current_pos + offset] = run_formatting
+
+                    current_pos += run_length
+
+                # Build a mapping of which tokens to format and their original formatting
                 format_map = []
+                original_formatting_map = []
+
                 for token in tokens:
                     should_format = False
 
+                    # Get original formatting for this token (from its starting character)
+                    # This MUST be done for ALL tokens, including punctuation and spaces,
+                    # to preserve their original formatting (e.g., purple citations)
+                    token_start = token.get('start_char', 0)
+                    original_fmt = char_formatting_map.get(token_start, None)
+
                     if token['is_punct'] or token['is_space']:
                         format_map.append(False)
+                        original_formatting_map.append(original_fmt)  # Preserve original formatting for punct/space
                         continue
 
                     pos = token['pos']
@@ -1532,31 +1633,38 @@ class FormattingService:
                     if should_format:
                         words_formatted += 1
 
+                    # Store original formatting for potential use
+                    original_formatting_map.append(original_fmt)
+
                 # Clear existing runs and rebuild with formatting
                 for run in paragraph.runs:
                     run._element.getparent().remove(run._element)
 
-                # Reconstruct text with formatting
+                # Reconstruct text with formatting, preserving spaces
                 for i, token in enumerate(tokens):
                     if token['is_space']:
-                        # Skip pure whitespace tokens
+                        # Skip pure whitespace tokens - they're handled explicitly
                         continue
 
-                    # Create new run
+                    # Create new run for the token
                     run = paragraph.add_run(token['text'])
 
-                    # Apply formatting if needed
+                    # Apply formatting if this token should be formatted
                     if i < len(format_map) and format_map[i]:
-                        # Apply text color
+                        # Apply NEW highlighting color
                         run.font.color.rgb = RGBColor(r, g, b)
 
-                        # Apply font family
+                        # Apply font family (user specified or original)
                         if font_family:
                             run.font.name = font_family
+                        elif i < len(original_formatting_map) and original_formatting_map[i]:
+                            run.font.name = original_formatting_map[i].get('font_name')
 
-                        # Apply font size
+                        # Apply font size (user specified or original)
                         if font_size:
                             run.font.size = Pt(font_size)
+                        elif i < len(original_formatting_map) and original_formatting_map[i]:
+                            run.font.size = original_formatting_map[i].get('font_size')
 
                         # Apply text styles
                         if apply_bold:
@@ -1565,12 +1673,55 @@ class FormattingService:
                             run.italic = True
                         if apply_underline:
                             run.underline = True
+                    else:
+                        # For non-formatted tokens, PRESERVE ORIGINAL FORMATTING COMPLETELY
+                        if i < len(original_formatting_map) and original_formatting_map[i]:
+                            orig_fmt = original_formatting_map[i]
 
-                    # Add space after token if it's not punctuation and not the last token
-                    if not token['is_punct'] and i < len(tokens) - 1:
-                        next_token = tokens[i + 1] if i + 1 < len(tokens) else None
-                        if next_token and not next_token['is_punct']:
-                            paragraph.add_run(' ')
+                            # Preserve font name
+                            if orig_fmt.get('font_name'):
+                                run.font.name = orig_fmt['font_name']
+
+                            # Preserve font size
+                            if orig_fmt.get('font_size'):
+                                run.font.size = orig_fmt['font_size']
+
+                            # Preserve font color (this is the key for purple text!)
+                            if orig_fmt.get('font_color'):
+                                run.font.color.rgb = orig_fmt['font_color']
+
+                            # Preserve bold
+                            if orig_fmt.get('bold') is not None:
+                                run.bold = orig_fmt['bold']
+
+                            # Preserve italic
+                            if orig_fmt.get('italic') is not None:
+                                run.italic = orig_fmt['italic']
+
+                            # Preserve underline
+                            if orig_fmt.get('underline') is not None:
+                                run.underline = orig_fmt['underline']
+
+                    # Add space after token if not the last token
+                    # Check if there should be a space by looking at the original text
+                    if i < len(tokens) - 1:
+                        # Get the text between current and next token from original
+                        current_end = token.get('end_char', 0)
+                        next_start = tokens[i + 1].get('start_char', 0) if i + 1 < len(tokens) else 0
+
+                        # If there's a gap between tokens, add space
+                        if next_start > current_end:
+                            space_run = paragraph.add_run(' ')
+
+                            # Preserve formatting of the space from the original text
+                            space_formatting = char_formatting_map.get(current_end, None)
+                            if space_formatting:
+                                if space_formatting.get('font_name'):
+                                    space_run.font.name = space_formatting['font_name']
+                                if space_formatting.get('font_size'):
+                                    space_run.font.size = space_formatting['font_size']
+                                if space_formatting.get('font_color'):
+                                    space_run.font.color.rgb = space_formatting['font_color']
 
                 # Restore paragraph formatting
                 paragraph.style = original_style

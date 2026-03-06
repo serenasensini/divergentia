@@ -113,7 +113,7 @@ class KeywordService:
             text: Text to analyze
 
         Returns:
-            List of dictionaries with token information (text, pos, lemma)
+            List of dictionaries with token information (text, pos, lemma, start_char, end_char)
         """
         if not text or not text.strip():
             logger.warning("Empty text provided for POS analysis")
@@ -129,7 +129,9 @@ class KeywordService:
                     'lemma': token.lemma_,
                     'is_stop': token.is_stop,
                     'is_punct': token.is_punct,
-                    'is_space': token.is_space
+                    'is_space': token.is_space,
+                    'start_char': token.idx,
+                    'end_char': token.idx + len(token.text)
                 })
             return tokens
         except Exception as e:
