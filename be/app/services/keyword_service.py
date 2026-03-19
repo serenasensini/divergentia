@@ -2,8 +2,13 @@
 Keyword Extraction Service - Extract keywords from text using spaCy
 """
 import logging
-from typing import List, Dict
+from typing import List, Dict, Optional, Any
 from collections import Counter
+
+from app.constants import (
+    POS_NOUNS, POS_VERBS, POS_ADJECTIVES, POS_ADVERBS,
+    MIN_KEYWORD_LENGTH
+)
 
 logger = logging.getLogger(__name__)
 
@@ -11,12 +16,12 @@ logger = logging.getLogger(__name__)
 class KeywordService:
     """Service for extracting keywords from text using spaCy NLP"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize keyword service with Italian language model"""
-        self.nlp = None
+        self.nlp: Optional[Any] = None
         self._load_model()
 
-    def _load_model(self):
+    def _load_model(self) -> None:
         """Load spaCy Italian language model"""
         try:
             import spacy
@@ -71,7 +76,7 @@ class KeywordService:
                 # Filter for nouns (NOUN) and optionally proper nouns (PROPN)
                 if token.pos_ == "NOUN" or (include_proper_nouns and token.pos_ == "PROPN"):
                     # Skip stop words and very short words
-                    if not token.is_stop and len(token.text) > 2:
+                    if not token.is_stop and len(token.text) > MIN_KEYWORD_LENGTH:
                         # Use lemmatized form for better grouping
                         nouns.append(token.lemma_.lower())
 
@@ -138,6 +143,31 @@ class KeywordService:
             logger.error(f"Error analyzing POS: {str(e)}")
             return []
 
+    def _check_pos(self, word: str, pos_types: List[str], pos_name: str = "POS") -> bool:
+        """
+        Generic part-of-speech checker.
+
+        Args:
+            word: Word to check
+            pos_types: List of POS tags to check against (e.g., ["NOUN", "PROPN"])
+            pos_name: Name of the POS for error logging (e.g., "noun", "verb")
+
+        Returns:
+            True if word matches any of the specified POS types, False otherwise
+        """
+        if not word or not word.strip():
+            return False
+
+        try:
+            doc = self.nlp(word.strip())
+            for token in doc:
+                if not token.is_punct and not token.is_space:
+                    return token.pos_ in pos_types
+            return False
+        except Exception as e:
+            logger.error(f"Error checking if word is {pos_name}: {str(e)}")
+            return False
+
     def is_noun(self, word: str) -> bool:
         """
         Check if a word is a noun.
@@ -148,18 +178,7 @@ class KeywordService:
         Returns:
             True if word is a noun, False otherwise
         """
-        if not word or not word.strip():
-            return False
-
-        try:
-            doc = self.nlp(word.strip())
-            for token in doc:
-                if not token.is_punct and not token.is_space:
-                    return token.pos_ in ["NOUN", "PROPN"]
-            return False
-        except Exception as e:
-            logger.error(f"Error checking if word is noun: {str(e)}")
-            return False
+        return self._check_pos(word, POS_NOUNS, "noun")
 
     def is_verb(self, word: str) -> bool:
         """
@@ -171,18 +190,7 @@ class KeywordService:
         Returns:
             True if word is a verb, False otherwise
         """
-        if not word or not word.strip():
-            return False
-
-        try:
-            doc = self.nlp(word.strip())
-            for token in doc:
-                if not token.is_punct and not token.is_space:
-                    return token.pos_ == "VERB"
-            return False
-        except Exception as e:
-            logger.error(f"Error checking if word is verb: {str(e)}")
-            return False
+        return self._check_pos(word, POS_VERBS, "verb")
 
     def is_adjective(self, word: str) -> bool:
         """
@@ -194,18 +202,7 @@ class KeywordService:
         Returns:
             True if word is an adjective, False otherwise
         """
-        if not word or not word.strip():
-            return False
-
-        try:
-            doc = self.nlp(word.strip())
-            for token in doc:
-                if not token.is_punct and not token.is_space:
-                    return token.pos_ == "ADJ"
-            return False
-        except Exception as e:
-            logger.error(f"Error checking if word is adjective: {str(e)}")
-            return False
+        return self._check_pos(word, POS_ADJECTIVES, "adjective")
 
     def is_adverb(self, word: str) -> bool:
         """
@@ -217,18 +214,7 @@ class KeywordService:
         Returns:
             True if word is an adverb, False otherwise
         """
-        if not word or not word.strip():
-            return False
-
-        try:
-            doc = self.nlp(word.strip())
-            for token in doc:
-                if not token.is_punct and not token.is_space:
-                    return token.pos_ == "ADV"
-            return False
-        except Exception as e:
-            logger.error(f"Error checking if word is adverb: {str(e)}")
-            return False
+        return self._check_pos(word, POS_ADVERBS, "adverb")
 
     def split_sentences(self, text: str) -> List[str]:
         """

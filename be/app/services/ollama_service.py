@@ -53,7 +53,7 @@ class OllamaService:
     def __init__(self):
         """Initialize Ollama service with configuration from Flask app"""
         self.base_url = current_app.config.get('OLLAMA_BASE_URL', 'http://localhost:11434')
-        self.model = current_app.config.get('OLLAMA_MODEL', 'llama2')
+        self.model = current_app.config.get('OLLAMA_MODEL', 'llama3:8b')
         self.timeout = current_app.config.get('OLLAMA_TIMEOUT', 120)
         self.max_retries = current_app.config.get('OLLAMA_MAX_RETRIES', 3)
 
@@ -356,7 +356,7 @@ Paraphrased text:"""
                     
                     Parole chiave:"""
             logger.debug(f"Prompt for keyword extraction: {prompt}")
-            response = self._generate_completion(prompt)
+            response = self._generate_completion(prompt, stream=True)
             logger.debug(f"Raw response for keyword extraction: {response.strip()}")
 
             # Parse response - expecting comma-separated keywords

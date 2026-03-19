@@ -20,6 +20,10 @@ class FramingOptionsSchema(BaseModel):
     paragraphs: bool = Field(False, description="Apply borders to paragraphs")
     subparagraphs: bool = Field(False, description="Apply borders to subparagraphs")
     sentences: bool = Field(False, description="Apply borders to sentences")
+    use_tables: bool = Field(False, description="Use tables for framing")
+    border_color: Optional[str] = Field(None, description="Border color in hex format")
+    border_style: Optional[str] = Field(None, description="Border style (e.g., solid, dashed, dotted)")
+    border_width: Optional[int] = Field(None, ge=1, le=16, description="Border width in points (1-16)")
 
 class SpacingOptionsSchema(BaseModel):
     """Schema for spacing options"""

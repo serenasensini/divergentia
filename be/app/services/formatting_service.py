@@ -28,16 +28,33 @@ class FormattingService:
         'txt': []  # Plain text has no formatting
     }
 
+    # Heading identification thresholds
+    HEADING_FONT_SIZE_THRESHOLD = 14.0  # Font size in points to consider as heading
+    MIN_WORD_LENGTH = 2  # Minimum word length for keyword extraction
+
+    # Default color specifications
+    DEFAULT_HIGHLIGHT_COLOR = "#cc5500"  # Default highlight color (orange)
+    DEFAULT_TEXT_COLOR_RGB = (0, 0, 0)  # Black RGB color tuple
+
     # Default border specifications
     DEFAULT_BORDER_WIDTH = 4  # 1/2 pt = 4 eighths of a point
-    DEFAULT_BORDER_COLOR = "000000"  # Black
+    DEFAULT_BORDER_COLOR = "000000"  # Black (hex without #)
     DEFAULT_BORDER_STYLE = "single"  # Solid line
 
-    def __init__(self):
+    # Table-based framing specifications
+    DEFAULT_TABLE_BORDER_WIDTH = 8  # 1 pt = 8 eighths of a point
+    DEFAULT_TABLE_CELL_MARGIN = 100  # Twips (1/1440 inch) - approx 1.76mm
+    DEFAULT_TABLE_SPACING = 120  # Twips - spacing between table boxes
+    
+    # Font size validation
+    MIN_FONT_SIZE = 6  # Minimum font size in points
+    MAX_FONT_SIZE = 72  # Maximum font size in points
+
+    def __init__(self) -> None:
         """Initialize formatting service"""
         logger.info("Formatting service initialized")
 
-    def _is_heading(self, para, check_font_size: bool = True, font_size_threshold: float = 14.0) -> bool:
+    def _is_heading(self, para, check_font_size: bool = True, font_size_threshold: float = None) -> bool:
         """
         Check if a paragraph is a heading based on style and optionally font size.
 
@@ -48,21 +65,31 @@ class FormattingService:
         Args:
             para: python-docx paragraph object
             check_font_size: Whether to check font size in addition to style (default: True)
-            font_size_threshold: Font size threshold in points (default: 14.0)
+            font_size_threshold: Font size threshold in points (default: HEADING_FONT_SIZE_THRESHOLD)
 
         Returns:
             bool: True if paragraph is a heading, False otherwise
         """
+        if font_size_threshold is None:
+            font_size_threshold = self.HEADING_FONT_SIZE_THRESHOLD
+        
         style_name = para.style.name
 
         # Check if style contains 'Heading'
         if 'Heading' in style_name:
+            logger.debug(f"Heading style found: {style_name}")
             return True
 
         # Optionally check font size
         if check_font_size:
             font_size = self._get_paragraph_font_size(para)
-            if font_size is not None and font_size > font_size_threshold:
+            logger.debug(f"Font size found: {font_size}")
+            # Check if font size is greater than threshold, or equal to threshold with a bold style (common for headings)
+            if (font_size is not None and font_size > font_size_threshold) or (font_size == font_size_threshold and 'bold' in style_name.lower()):
+                logger.debug(f"Font size is {font_size} pt, which meets the heading threshold of {font_size_threshold} pt")
+                return True
+            elif para.runs and any(run.font.bold for run in para.runs):
+                logger.debug("Paragraph has bold runs, which may indicate a heading")
                 return True
 
         return False
@@ -91,7 +118,8 @@ class FormattingService:
             bool: True if paragraph is a section heading, False otherwise
         """
         style_name = para.style.name
-        return 'Heading' in style_name and 'Heading 1' not in style_name
+        # Check if style contains 'Heading' but is not 'Heading 1', or if it has bold formatting (common for section headings) or underlined (another common style for section headings)
+        return ('Heading' in style_name and 'Heading 1' not in style_name) or (para.runs and all(run.font.bold for run in para.runs)) or (para.runs and all(run.font.underline for run in para.runs))
 
     def _get_paragraph_font_size(self, para) -> Optional[float]:
         """
@@ -173,7 +201,7 @@ class FormattingService:
         input_path: str,
         output_path: str,
         framing_options: Dict[str, bool]
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any] | str:
         """
         Apply framing (borders) to document parts.
 
@@ -206,7 +234,6 @@ class FormattingService:
                 return self._apply_framing_docx(input_path, output_path, framing_options)
             elif file_extension == 'pdf':
                 return "PDF framing is currently under development and has limited support"
-                # return self._apply_framing_pdf(input_path, output_path, framing_options)
             else:
                 raise FormattingException(f"Framing not supported for {file_extension}")
 
@@ -740,7 +767,7 @@ class FormattingService:
 
                 # Determina se questo paragrafo è un heading
                 style_name = para.style.name
-                is_heading = self._is_heading(para, check_font_size=True, font_size_threshold=14.0)
+                is_heading = self._is_heading(para, check_font_size=True, font_size_threshold=self.HEADING_FONT_SIZE_THRESHOLD)
                 font_size = self._get_paragraph_font_size(para)
 
                 logger.debug(f"  Style: {style_name}, is_heading: {is_heading}, font_size: {font_size}")
@@ -1037,77 +1064,167 @@ class FormattingService:
         self,
         input_path: str,
         output_path: str,
-        framing_options: Dict[str, bool]
+        framing_options: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Apply framing (borders) to DOCX document parts.
+        Apply framing (borders) to DOCX document parts using table encapsulation.
+
+        This method encapsulates paragraphs or sections in 1x1 tables with customizable borders.
+        It preserves all content including:
+        - Text formatting (bold, italic, underline, colors)
+        - Hyperlinks and references
+        - Images and embedded objects
+        - Paragraph styles and alignment
+        - Spacing before/after paragraphs
 
         Args:
             input_path: Input file path
             output_path: Output file path
-            framing_options: Dictionary with boolean flags
+            framing_options: Dictionary with framing options:
+                - sections: bool - Frame entire sections
+                - paragraphs: bool - Frame individual paragraphs
+                - subparagraphs: bool - Frame subparagraphs
+                - sentences: bool - Frame sentences
+                - use_tables: bool - Use table encapsulation (default: True)
+                - border_width: int - Border width in eighths of a point (default: 8)
+                - border_color: str - Border color in hex without # (default: "000000")
+                - border_style: str - Border style: single, double, dashed, etc. (default: "single")
+                - cell_margin: int - Cell margin in twips (default: 100)
+                - preserve_spacing: bool - Preserve paragraph spacing (default: True)
+                - filter: dict - Filtering options:
+                    - style_names: List[str] - Only frame these styles
+                    - exclude_headings: bool - Exclude headings (default: True)
+                    - exclude_empty: bool - Exclude empty paragraphs (default: True)
+                    - min_length: int - Minimum text length (default: 0)
+                    - has_marker: str - Only frame paragraphs containing this text
 
         Returns:
-            Result information
+            Result information including number of frames applied
+
+        Raises:
+            FormattingException: If framing fails
         """
         logger.info("Applying framing to DOCX document")
 
         try:
-            # Apply borders to sections, paragraphs, subparagraphs, sentences based on options
             doc = Document(input_path)
             borders_applied = 0
 
-            # Apply borders based on options
+            # Extract options with defaults
+            use_tables = framing_options.get('use_tables', True)
+            border_width = framing_options.get('border_width', None)
+            border_color = framing_options.get('border_color', None)
+            border_style = framing_options.get('border_style', None)
+            cell_margin = framing_options.get('cell_margin', None)
+            preserve_spacing = framing_options.get('preserve_spacing', True)
+            filter_options = framing_options.get('filter', None)
+
+            logger.info(f"Framing mode: {'Table encapsulation' if use_tables else 'Paragraph borders'}")
+            if use_tables:
+                logger.info(f"Border settings - Width: {border_width or self.DEFAULT_TABLE_BORDER_WIDTH}, "
+                           f"Color: {border_color or self.DEFAULT_BORDER_COLOR}, "
+                           f"Style: {border_style or self.DEFAULT_BORDER_STYLE}")
+
+            # Collect paragraphs to frame based on options
+            paragraphs_to_frame = []
+
             if framing_options.get('sections', False):
                 sections = self._identify_sections(doc)
-                logger.debug(f"Total sections identified: {len(sections)}")
-                logger.debug(f"Example of identified sections: {[(s[0], s[1]) for s in sections[:3]]}")
+                logger.info(f"Identified {len(sections)} sections to frame")
+
                 for start_idx, end_idx, section_text in sections:
-                    logger.debug("Applying border to section from paragraph index {} to {}".format(start_idx, end_idx))
-                    for idx in range(start_idx, end_idx + 1):
-                        logger.debug(f"Applying border to paragraph {idx}: '{doc.paragraphs[idx].text[:50]}...'")
-                        self._add_paragraph_border(doc.paragraphs[idx])
-                        borders_applied += 1
-                logger.info(f"Applied borders to {len(sections)} sections")
+                    if use_tables:
+                        # Frame entire section as one table
+                        # For now, frame each paragraph in the section individually
+                        # TODO: Future enhancement - merge section paragraphs into single table
+                        for idx in range(start_idx, end_idx + 1):
+                            para = doc.paragraphs[idx]
+                            if self._should_frame_paragraph(para, filter_options):
+                                paragraphs_to_frame.append(idx)
+                    else:
+                        # Use traditional paragraph borders
+                        for idx in range(start_idx, end_idx + 1):
+                            para = doc.paragraphs[idx]
+                            if self._should_frame_paragraph(para, filter_options):
+                                self._add_paragraph_border(para)
+                                borders_applied += 1
 
             if framing_options.get('paragraphs', False):
                 paragraphs = self._identify_paragraphs(doc)
+                logger.info(f"Identified {len(paragraphs)} paragraphs to frame")
+
                 for idx in paragraphs:
-                    logger.debug(f"Applying border to paragraph {idx}: '{doc.paragraphs[idx].text}...'")
-                    self._add_sentence_border(doc.paragraphs[idx])
-                    borders_applied += 1
-                logger.info(f"Applied borders to {len(paragraphs)} paragraphs")
+                    para = doc.paragraphs[idx]
+                    if self._should_frame_paragraph(para, filter_options):
+                        if use_tables:
+                            paragraphs_to_frame.append(idx)
+                        else:
+                            self._add_paragraph_border(para)
+                            borders_applied += 1
 
             if framing_options.get('subparagraphs', False):
                 subparagraphs = self._identify_subparagraphs(doc)
-                # For subparagraphs, we apply borders to the containing paragraph
+                logger.info(f"Identified {len(subparagraphs)} subparagraphs to frame")
+
                 for para_idx, _ in subparagraphs:
-                    self._add_paragraph_border(doc.paragraphs[para_idx])
-                    borders_applied += 1
-                logger.info(f"Applied borders to {len(subparagraphs)} subparagraphs")
+                    para = doc.paragraphs[para_idx]
+                    if self._should_frame_paragraph(para, filter_options):
+                        if use_tables:
+                            paragraphs_to_frame.append(para_idx)
+                        else:
+                            self._add_paragraph_border(para)
+                            borders_applied += 1
 
             if framing_options.get('sentences', False):
                 sentence_map = self._identify_sentences(doc)
-                logger.debug(f"Sentence map example: {sentence_map[:3]}")
-                # Apply border to each sentence
+                logger.info(f"Identified sentences in {len(sentence_map)} paragraphs to frame")
+
                 for para_idx, sentences in sentence_map:
-                    logger.debug(f"Applying sentence borders to paragraph {para_idx} with sentences: {sentences[:3]}")
                     if len(sentences) > 0:
-                        self._add_paragraph_border(doc.paragraphs[para_idx])
+                        para = doc.paragraphs[para_idx]
+                        if self._should_frame_paragraph(para, filter_options):
+                            if use_tables:
+                                paragraphs_to_frame.append(para_idx)
+                            else:
+                                self._add_paragraph_border(para)
+                                borders_applied += 1
+
+            # Apply table encapsulation if using tables
+            if use_tables and paragraphs_to_frame:
+                # Remove duplicates and sort in reverse order to avoid index shifting
+                paragraphs_to_frame = sorted(set(paragraphs_to_frame), reverse=True)
+
+                logger.info(f"Encapsulating {len(paragraphs_to_frame)} paragraphs in tables")
+
+                for idx in paragraphs_to_frame:
+                    try:
+                        para = doc.paragraphs[idx]
+                        self._encapsulate_paragraph_in_table(
+                            paragraph=para,
+                            doc=doc,
+                            border_width=border_width,
+                            border_color=border_color,
+                            border_style=border_style,
+                            cell_margin=cell_margin,
+                            preserve_spacing=preserve_spacing
+                        )
                         borders_applied += 1
-                logger.info(f"Applied borders to paragraphs containing sentences")
+                    except Exception as e:
+                        logger.error(f"Failed to encapsulate paragraph {idx}: {str(e)}")
+                        # Continue with other paragraphs
 
             # Save document
             doc.save(output_path)
 
-            logger.info(f"DOCX framing completed: {borders_applied} borders applied")
+            logger.info(f"DOCX framing completed: {borders_applied} frames applied")
 
             return {
                 'success': True,
                 'output_path': output_path,
                 'format': 'docx',
                 'borders_applied': borders_applied,
-                'framing_options': framing_options
+                'framing_options': framing_options,
+                'method': 'table_encapsulation' if use_tables else 'paragraph_borders'
             }
 
         except Exception as e:
@@ -1500,7 +1617,7 @@ class FormattingService:
                 }
 
             # Extract options
-            color = highlighting_options.get('color', '#cc5500').lstrip('#')
+            color = highlighting_options.get('color', self.DEFAULT_HIGHLIGHT_COLOR).lstrip('#')
             style_str = highlighting_options.get('style', None)
             font_size = highlighting_options.get('font_size', None)
             font_family = highlighting_options.get('font_family', None)
@@ -1526,7 +1643,7 @@ class FormattingService:
                 b = int(color[4:6], 16)
             except ValueError:
                 logger.warning(f"Invalid color format: {color}, using default black")
-                r, g, b = 0, 0, 0
+                r, g, b = self.DEFAULT_TEXT_COLOR_RGB
 
             # Statistics
             words_formatted = 0
@@ -1559,7 +1676,35 @@ class FormattingService:
                     logger.debug(f"Skipping paragraph {para_idx} (heading or non-section content)")
                     continue
 
+                # IMPORTANT: Also skip if this paragraph IS a heading (title)
+                # Even if it's in section_paragraph_indices, headings should not be processed
+                if self._is_heading(paragraph):
+                    logger.debug(f"Skipping paragraph {para_idx} (is a heading)")
+                    continue
+
+                # Skip paragraphs starting with "Parole chiave"
+                if paragraph.text.strip().startswith("Parole chiave"):
+                    logger.debug(f"Skipping paragraph {para_idx} (starts with 'Parole chiave')")
+                    continue
+
                 if not paragraph.text.strip():
+                    continue
+
+                # CRITICAL: Skip paragraphs that contain complex fields (citations/references)
+                # Processing paragraphs with fields can cause them to be moved or corrupted
+                paragraph_has_complex_field = False
+                for run in paragraph.runs:
+                    if run._element is not None:
+                        for child in run._element:
+                            tag_name = child.tag
+                            if 'fldChar' in tag_name or 'instrText' in tag_name or 'fldData' in tag_name:
+                                paragraph_has_complex_field = True
+                                break
+                        if paragraph_has_complex_field:
+                            break
+
+                if paragraph_has_complex_field:
+                    logger.debug(f"Skipping paragraph {para_idx} (contains citation/reference fields)")
                     continue
 
                 paragraphs_processed += 1
@@ -1574,48 +1719,22 @@ class FormattingService:
                 original_style = paragraph.style
                 original_alignment = paragraph.alignment
 
-                # Map original formatting for each character position in the paragraph
-                # This preserves the exact formatting of each word as it was originally
-                char_formatting_map = {}
-                current_pos = 0
 
-                for run in paragraph.runs:
-                    run_length = len(run.text)
-                    run_formatting = {
-                        'font_name': run.font.name,
-                        'font_size': run.font.size,
-                        'font_color': run.font.color.rgb if run.font.color.rgb else None,
-                        'bold': run.bold,
-                        'italic': run.italic,
-                        'underline': run.underline
-                    }
-
-                    # Store formatting for each character in this run
-                    for offset in range(run_length):
-                        char_formatting_map[current_pos + offset] = run_formatting
-
-                    current_pos += run_length
-
-                # Build a mapping of which tokens to format and their original formatting
-                format_map = []
-                original_formatting_map = []
+                # Build a map of character positions to format decisions
+                # Map directly from tokens with POS decisions
+                char_format_decisions = {}
 
                 for token in tokens:
-                    should_format = False
-
-                    # Get original formatting for this token (from its starting character)
-                    # This MUST be done for ALL tokens, including punctuation and spaces,
-                    # to preserve their original formatting (e.g., purple citations)
-                    token_start = token.get('start_char', 0)
-                    original_fmt = char_formatting_map.get(token_start, None)
-
+                    # Skip punctuation and spaces
                     if token['is_punct'] or token['is_space']:
-                        format_map.append(False)
-                        original_formatting_map.append(original_fmt)  # Preserve original formatting for punct/space
                         continue
 
+                    token_start = token.get('start_char', 0)
+                    token_end = token.get('end_char', 0)
                     pos = token['pos']
 
+                    # Determine if this token should be formatted based on its POS
+                    should_format = False
                     if highlight_nouns and pos in ['NOUN', 'PROPN']:
                         should_format = True
                         pos_stats['nouns'] += 1
@@ -1629,99 +1748,121 @@ class FormattingService:
                         should_format = True
                         pos_stats['adverbs'] += 1
 
-                    format_map.append(should_format)
+                    # Mark all characters in this token with the formatting decision
                     if should_format:
                         words_formatted += 1
+                        for char_pos in range(token_start, token_end):
+                            char_format_decisions[char_pos] = True
 
-                    # Store original formatting for potential use
-                    original_formatting_map.append(original_fmt)
+                # Build a list of runs with metadata about what to do with each
+                runs_info = []
+                current_char_pos = 0
 
-                # Clear existing runs and rebuild with formatting
+                for run in paragraph.runs:
+                    run_text = run.text
+                    run_length = len(run_text)
+
+                    # Check if this run contains complex field elements (citations, references)
+                    has_complex_field = False
+                    if run._element is not None:
+                        for child in run._element:
+                            tag_name = child.tag
+                            if 'fldChar' in tag_name or 'instrText' in tag_name or 'fldData' in tag_name:
+                                has_complex_field = True
+                                break
+
+                    # Store run info
+                    runs_info.append({
+                        'run': run,
+                        'element': run._element,  # Keep reference to original element
+                        'start_pos': current_char_pos,
+                        'end_pos': current_char_pos + run_length,
+                        'text': run_text,
+                        'has_complex_field': has_complex_field,
+                        'original_formatting': {
+                            'font_name': run.font.name,
+                            'font_size': run.font.size,
+                            'font_color': run.font.color.rgb if run.font.color.rgb else None,
+                            'bold': run.bold,
+                            'italic': run.italic,
+                            'underline': run.underline
+                        }
+                    })
+
+                    current_char_pos += run_length
+
+                # Get paragraph element for manipulating XML
+                paragraph_element = paragraph._element
+
+                # First, remove all existing runs from the paragraph
                 for run in paragraph.runs:
                     run._element.getparent().remove(run._element)
 
-                # Reconstruct text with formatting, preserving spaces
-                for i, token in enumerate(tokens):
-                    if token['is_space']:
-                        # Skip pure whitespace tokens - they're handled explicitly
+                # Now rebuild runs in the correct order
+                for run_info in runs_info:
+                    # If this run has complex fields, reinsert the original element
+                    if run_info['has_complex_field']:
+                        logger.debug(f"Preserving run with complex field (citation/reference)")
+                        paragraph_element.append(run_info['element'])
                         continue
 
-                    # Create new run for the token
-                    run = paragraph.add_run(token['text'])
+                    run_start = run_info['start_pos']
+                    run_text = run_info['text']
+                    orig_fmt = run_info['original_formatting']
 
-                    # Apply formatting if this token should be formatted
-                    if i < len(format_map) and format_map[i]:
-                        # Apply NEW highlighting color
-                        run.font.color.rgb = RGBColor(r, g, b)
+                    if not run_text:
+                        # Empty run, skip it
+                        continue
 
-                        # Apply font family (user specified or original)
-                        if font_family:
-                            run.font.name = font_family
-                        elif i < len(original_formatting_map) and original_formatting_map[i]:
-                            run.font.name = original_formatting_map[i].get('font_name')
+                    # Split this run into segments based on char_format_decisions
+                    char_idx = 0
+                    while char_idx < len(run_text):
+                        char_pos = run_start + char_idx
+                        should_format_segment = char_format_decisions.get(char_pos, False)
 
-                        # Apply font size (user specified or original)
-                        if font_size:
-                            run.font.size = Pt(font_size)
-                        elif i < len(original_formatting_map) and original_formatting_map[i]:
-                            run.font.size = original_formatting_map[i].get('font_size')
+                        # Find the end of this segment (consecutive chars with same decision)
+                        segment_start = char_idx
+                        while (char_idx < len(run_text) and
+                               char_format_decisions.get(run_start + char_idx, False) == should_format_segment):
+                            char_idx += 1
 
-                        # Apply text styles
-                        if apply_bold:
-                            run.bold = True
-                        if apply_italic:
-                            run.italic = True
-                        if apply_underline:
-                            run.underline = True
-                    else:
-                        # For non-formatted tokens, PRESERVE ORIGINAL FORMATTING COMPLETELY
-                        if i < len(original_formatting_map) and original_formatting_map[i]:
-                            orig_fmt = original_formatting_map[i]
+                        # Create a new run element for this segment
+                        segment_text = run_text[segment_start:char_idx]
 
-                            # Preserve font name
-                            if orig_fmt.get('font_name'):
-                                run.font.name = orig_fmt['font_name']
+                        # Use paragraph.add_run which adds to the end (which maintains order since we process sequentially)
+                        new_run = paragraph.add_run(segment_text)
 
-                            # Preserve font size
-                            if orig_fmt.get('font_size'):
-                                run.font.size = orig_fmt['font_size']
+                        # Apply original formatting
+                        if orig_fmt['font_name']:
+                            new_run.font.name = orig_fmt['font_name']
+                        if orig_fmt['font_size']:
+                            new_run.font.size = orig_fmt['font_size']
+                        if orig_fmt['font_color']:
+                            new_run.font.color.rgb = orig_fmt['font_color']
+                        if orig_fmt['bold'] is not None:
+                            new_run.bold = orig_fmt['bold']
+                        if orig_fmt['italic'] is not None:
+                            new_run.italic = orig_fmt['italic']
+                        if orig_fmt['underline'] is not None:
+                            new_run.underline = orig_fmt['underline']
 
-                            # Preserve font color (this is the key for purple text!)
-                            if orig_fmt.get('font_color'):
-                                run.font.color.rgb = orig_fmt['font_color']
+                        # Apply new formatting if this segment should be formatted
+                        if should_format_segment:
+                            new_run.font.color.rgb = RGBColor(r, g, b)
 
-                            # Preserve bold
-                            if orig_fmt.get('bold') is not None:
-                                run.bold = orig_fmt['bold']
+                            if font_family:
+                                new_run.font.name = font_family
 
-                            # Preserve italic
-                            if orig_fmt.get('italic') is not None:
-                                run.italic = orig_fmt['italic']
+                            if font_size:
+                                new_run.font.size = Pt(font_size)
 
-                            # Preserve underline
-                            if orig_fmt.get('underline') is not None:
-                                run.underline = orig_fmt['underline']
+                            if apply_bold:
+                                new_run.bold = True
+                            if apply_italic:
+                                new_run.italic = True
+                            if apply_underline:
+                                new_run.underline = True
 
-                    # Add space after token if not the last token
-                    # Check if there should be a space by looking at the original text
-                    if i < len(tokens) - 1:
-                        # Get the text between current and next token from original
-                        current_end = token.get('end_char', 0)
-                        next_start = tokens[i + 1].get('start_char', 0) if i + 1 < len(tokens) else 0
-
-                        # If there's a gap between tokens, add space
-                        if next_start > current_end:
-                            space_run = paragraph.add_run(' ')
-
-                            # Preserve formatting of the space from the original text
-                            space_formatting = char_formatting_map.get(current_end, None)
-                            if space_formatting:
-                                if space_formatting.get('font_name'):
-                                    space_run.font.name = space_formatting['font_name']
-                                if space_formatting.get('font_size'):
-                                    space_run.font.size = space_formatting['font_size']
-                                if space_formatting.get('font_color'):
-                                    space_run.font.color.rgb = space_formatting['font_color']
 
                 # Restore paragraph formatting
                 paragraph.style = original_style
@@ -1802,22 +1943,274 @@ class FormattingService:
             }
         }
 
+    def _encapsulate_paragraph_in_table(
+        self,
+        paragraph,
+        doc,
+        border_width: Optional[int] = None,
+        border_color: Optional[str] = None,
+        border_style: Optional[str] = None,
+        cell_margin: Optional[int] = None,
+        preserve_spacing: bool = True
+    ) -> None:
+        """
+        Encapsulate a paragraph in a 1x1 table with customizable borders.
+
+        This method:
+        - Creates a 1x1 table
+        - Moves the paragraph content into the table cell
+        - Preserves all runs (bold, italic, links, images, etc.)
+        - Maintains paragraph style and spacing
+        - Sets customizable borders
+
+        Args:
+            paragraph: python-docx paragraph object to encapsulate
+            doc: python-docx document object
+            border_width: Border width in eighths of a point (default: DEFAULT_TABLE_BORDER_WIDTH)
+            border_color: Border color in hex format without # (default: DEFAULT_BORDER_COLOR)
+            border_style: Border style - 'single', 'double', 'dashed', etc. (default: DEFAULT_BORDER_STYLE)
+            cell_margin: Cell margin in twips (default: DEFAULT_TABLE_CELL_MARGIN)
+            preserve_spacing: Whether to preserve paragraph spacing (default: True)
+        """
+        # Use defaults if not specified
+        if border_width is None:
+            border_width = self.DEFAULT_TABLE_BORDER_WIDTH
+        if border_color is None:
+            border_color = self.DEFAULT_BORDER_COLOR
+        if border_style is None:
+            border_style = self.DEFAULT_BORDER_STYLE
+        if cell_margin is None:
+            cell_margin = self.DEFAULT_TABLE_CELL_MARGIN
+
+        # Store original paragraph properties
+        original_style = paragraph.style
+        original_alignment = paragraph.alignment
+
+        # Store spacing if needed
+        spacing_before = None
+        spacing_after = None
+        if preserve_spacing:
+            para_format = paragraph.paragraph_format
+            spacing_before = para_format.space_before
+            spacing_after = para_format.space_after
+
+        # Get paragraph position in document
+        para_element = paragraph._element
+        para_parent = para_element.getparent()
+        para_index = list(para_parent).index(para_element)
+
+        # Create a 1x1 table
+        table = doc.add_table(rows=1, cols=1)
+        cell = table.rows[0].cells[0]
+
+        # Move table element to paragraph position
+        table_element = table._element
+        para_parent.insert(para_index, table_element)
+
+        # Copy all runs from original paragraph to cell
+        cell_paragraph = cell.paragraphs[0]
+
+        # Copy paragraph style and alignment
+        try:
+            cell_paragraph.style = original_style
+        except:
+            logger.debug(f"Could not copy paragraph style: {original_style}")
+
+        if original_alignment:
+            cell_paragraph.alignment = original_alignment
+
+        # Copy all runs with their formatting
+        for run in paragraph.runs:
+            new_run = cell_paragraph.add_run(run.text)
+
+            # Copy run formatting
+            if run.bold is not None:
+                new_run.bold = run.bold
+            if run.italic is not None:
+                new_run.italic = run.italic
+            if run.underline is not None:
+                new_run.underline = run.underline
+            if run.font.name:
+                new_run.font.name = run.font.name
+            if run.font.size:
+                new_run.font.size = run.font.size
+            if run.font.color.rgb:
+                new_run.font.color.rgb = run.font.color.rgb
+
+            # Copy hyperlinks and other complex elements at XML level
+            if run._element is not None:
+                for child in run._element:
+                    # Copy hyperlink elements
+                    if 'hyperlink' in str(child.tag).lower():
+                        # Clone the hyperlink element
+                        new_run._element.append(child)
+
+        # Set table properties
+        self._set_table_borders(table, border_width, border_color, border_style)
+        self._set_table_cell_margins(table, cell_margin)
+
+        # Set table spacing if preserving original spacing
+        if preserve_spacing and (spacing_before or spacing_after):
+            tblPr = table._element.find(qn('w:tblPr'))
+            if tblPr is None:
+                tblPr = OxmlElement('w:tblPr')
+                table._element.insert(0, tblPr)
+
+            # Add spacing before
+            if spacing_before:
+                tblPrEx = OxmlElement('w:tblpPr')
+                tblPrEx.set(qn('w:topFromText'), str(int(spacing_before.pt * 20)))
+                tblPr.append(tblPrEx)
+
+            # Add spacing after
+            if spacing_after:
+                # Use paragraph spacing in the cell
+                cell_paragraph.paragraph_format.space_after = spacing_after
+
+        # Remove original paragraph
+        para_parent.remove(para_element)
+
+        # Add an empty paragraph after the table for visual separation
+        empty_para = OxmlElement('w:p')
+        para_parent.insert(para_index + 1, empty_para)
+
+        logger.debug(f"Encapsulated paragraph in table: '{cell_paragraph.text[:50]}...'")
+
+    def _set_table_borders(
+        self,
+        table,
+        border_width: int,
+        border_color: str,
+        border_style: str
+    ) -> None:
+        """
+        Set borders for a table.
+
+        Args:
+            table: python-docx table object
+            border_width: Border width in eighths of a point
+            border_color: Border color in hex format without #
+            border_style: Border style (single, double, dashed, etc.)
+        """
+        tbl = table._element
+        tblPr = tbl.find(qn('w:tblPr'))
+        if tblPr is None:
+            tblPr = OxmlElement('w:tblPr')
+            tbl.insert(0, tblPr)
+
+        # Remove existing borders if any
+        existing_borders = tblPr.find(qn('w:tblBorders'))
+        if existing_borders is not None:
+            tblPr.remove(existing_borders)
+
+        # Create new borders
+        tblBorders = OxmlElement('w:tblBorders')
+
+        for border_name in ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']:
+            border = OxmlElement(f'w:{border_name}')
+            border.set(qn('w:val'), border_style)
+            border.set(qn('w:sz'), str(border_width))
+            border.set(qn('w:space'), '0')
+            border.set(qn('w:color'), border_color)
+            tblBorders.append(border)
+
+        tblPr.append(tblBorders)
+
+    def _set_table_cell_margins(self, table, margin: int) -> None:
+        """
+        Set cell margins for a table.
+
+        Args:
+            table: python-docx table object
+            margin: Margin in twips (1/1440 inch)
+        """
+        tbl = table._element
+        tblPr = tbl.find(qn('w:tblPr'))
+        if tblPr is None:
+            tblPr = OxmlElement('w:tblPr')
+            tbl.insert(0, tblPr)
+
+        # Remove existing margins if any
+        existing_margins = tblPr.find(qn('w:tblCellMar'))
+        if existing_margins is not None:
+            tblPr.remove(existing_margins)
+
+        # Create cell margins
+        tblCellMar = OxmlElement('w:tblCellMar')
+
+        for side in ['top', 'left', 'bottom', 'right']:
+            margin_elem = OxmlElement(f'w:{side}')
+            margin_elem.set(qn('w:w'), str(margin))
+            margin_elem.set(qn('w:type'), 'dxa')  # dxa = twentieths of a point
+            tblCellMar.append(margin_elem)
+
+        tblPr.append(tblCellMar)
+
+    def _should_frame_paragraph(
+        self,
+        paragraph,
+        filter_options: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Determine if a paragraph should be framed based on filter options.
+
+        Args:
+            paragraph: python-docx paragraph object
+            filter_options: Dictionary with filtering criteria:
+                - style_names: List of style names to include (e.g., ['Normal', 'Body Text'])
+                - exclude_headings: Whether to exclude heading paragraphs
+                - exclude_empty: Whether to exclude empty paragraphs
+                - min_length: Minimum text length to include
+                - has_marker: Text marker that paragraph must contain
+
+        Returns:
+            bool: True if paragraph should be framed, False otherwise
+        """
+        if filter_options is None:
+            return True
+
+        # Check if empty and should exclude
+        if filter_options.get('exclude_empty', True) and not paragraph.text.strip():
+            return False
+
+        # Check minimum length
+        min_length = filter_options.get('min_length', 0)
+        if len(paragraph.text) < min_length:
+            return False
+
+        # Check if heading and should exclude
+        if filter_options.get('exclude_headings', True):
+            if self._is_heading(paragraph):
+                return False
+
+        # Check style names
+        style_names = filter_options.get('style_names', None)
+        if style_names:
+            if paragraph.style.name not in style_names:
+                return False
+
+        # Check for required marker
+        has_marker = filter_options.get('has_marker', None)
+        if has_marker:
+            if has_marker not in paragraph.text:
+                return False
+
+        return True
+
 
 # Singleton instance
-_formatting_service_instance: Optional[FormattingService] = None
+_formatting_service_instance = None
 
 
 def get_formatting_service() -> FormattingService:
     """
-    Get or create FormattingService singleton instance.
+    Get singleton instance of FormattingService.
 
     Returns:
-        FormattingService instance (singleton)
+        FormattingService: Singleton instance
     """
     global _formatting_service_instance
-
     if _formatting_service_instance is None:
         _formatting_service_instance = FormattingService()
-        logger.info("Formatting service singleton instance created")
-
     return _formatting_service_instance
+

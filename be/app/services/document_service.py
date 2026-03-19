@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class DocumentService:
     """Service for managing document operations"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize document service"""
         self.ollama_service = get_ollama_service()
         self.formatting_service = get_formatting_service()
