@@ -1,33 +1,41 @@
-FROM python:3.11-slim
+# Lightweight image for the single-shot, local Divergentia API.
+FROM docker.io/library/python:3.11-slim
 
-# Set working directory
-WORKDIR /app
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    libmagic1 \
+# System deps: libmagic for file-type detection, build tools for wheels that
+# need compiling (removed afterwards to keep the image small).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc g++ libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
+WORKDIR /app
+
+# Install runtime Python dependencies (dev/test tools are intentionally excluded).
 COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt \
+    && python -m spacy download it_core_news_lg
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Drop the compilers once wheels are built to slim the final image.
+RUN apt-get purge -y gcc g++ && apt-get autoremove -y
 
-# Copy application code
+# Copy application code (see .dockerignore for what is excluded).
 COPY . .
 
-# Create necessary directories
-RUN mkdir -p uploads outputs logs
+# Runtime directories for uploads and generated files.
+RUN mkdir -p uploads outputs
 
-# Set environment variables
-ENV FLASK_APP=run.py
-ENV PYTHONUNBUFFERED=1
+# Run as a non-root user.
+RUN useradd --create-home --uid 1000 appuser \
+    && chown -R appuser:appuser /app
+USER appuser
 
-# Expose port
+ENV FLASK_APP=run.py \
+    PYTHONUNBUFFERED=1 \
+    FLASK_ENV=production
+
 EXPOSE 5000
 
-# Run application with gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--timeout", "120", "run:app"]
+# Single worker: the document registry is in-memory and shared per process for
+# the one local user. Threads handle concurrent requests within that process.
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", \
+     "--workers", "1", "--threads", "4", "--timeout", "120", \
+     "run:app"]

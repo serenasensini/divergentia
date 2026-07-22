@@ -10,7 +10,9 @@ from pathlib import Path
 
 from app.services.ollama_service import get_ollama_service
 from app.services.formatting_service import get_formatting_service
+from app.repositories.document_repository import DocumentRepository, get_repository
 from app.utils.text_extractor import extract_text_from_file
+from app.utils.file_handler import cap_filename
 from app.exceptions.custom_exceptions import (
     DocumentNotFoundException,
     FileProcessingException
@@ -22,13 +24,19 @@ logger = logging.getLogger(__name__)
 class DocumentService:
     """Service for managing document operations"""
 
-    def __init__(self) -> None:
-        """Initialize document service"""
+    def __init__(self, repository: Optional[DocumentRepository] = None) -> None:
+        """Initialize document service.
+
+        Args:
+            repository: Optional document repository. Defaults to the shared
+                SQLite-backed registry so records persist across restarts and
+                are shared across workers.
+        """
         self.ollama_service = get_ollama_service()
         self.formatting_service = get_formatting_service()
 
-        # In-memory document storage (replace with database in production)
-        self._documents: Dict[str, Dict[str, Any]] = {}
+        # Persistent document registry (SQLite-backed).
+        self.repository = repository or get_repository()
 
         logger.info("Document service initialized")
 
@@ -60,15 +68,14 @@ class DocumentService:
             'file_size': file_size,
             'mime_type': mime_type,
             'file_extension': Path(original_filename).suffix.lower().lstrip('.'),
-            'created_at': None,  # Add timestamp in production
+            'created_at': datetime.datetime.now().isoformat(),
             'modified_at': None,
             'text_content': None,
             'formatted_path': None
         }
 
-        self._documents[document_id] = document
+        self.repository.create(document)
         logger.info(f"Document created with ID: {document_id}")
-        logger.debug(f"Listing all documents after creation: {list(self._documents.keys())}")
 
         return document
 
@@ -85,12 +92,64 @@ class DocumentService:
         Raises:
             DocumentNotFoundException: If document not found
         """
-        logger.debug(f"Listing all documents: {list(self._documents.keys())}")
         logger.info(f"Retrieving document with ID: {document_id}")
-        if document_id not in self._documents:
+        document = self.repository.get(document_id)
+        if document is None:
             raise DocumentNotFoundException(document_id)
 
-        return self._documents[document_id]
+        return document
+
+    def _source_path(self, document: Dict[str, Any], from_original: bool = False) -> str:
+        """Return the path an operation should read from.
+
+        By default operations chain: each one reads the latest processed version
+        (``formatted_path``) so multiple endpoints called in sequence accumulate
+        their changes into a single output. Pass ``from_original=True`` to ignore
+        previous processing and start again from the uploaded file.
+
+        Args:
+            document: Document record.
+            from_original: When True, always read the original uploaded file.
+
+        Returns:
+            The filesystem path to use as the operation's input.
+        """
+        if from_original:
+            return document['file_path']
+        return document.get('formatted_path') or document['file_path']
+
+    def _finalize(
+        self,
+        document: Dict[str, Any],
+        output_path: str,
+        result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Persist the new processed version and build a client-facing response.
+
+        Records ``output_path`` as the document's latest ``formatted_path`` so a
+        subsequent operation chains from it and ``/download`` serves it. The
+        response returns the ``document_id`` and a ``download_url`` (not the raw
+        server path), so the front-end can download by id after any number of
+        chained operations.
+
+        Args:
+            document: Document record being processed.
+            output_path: Path of the freshly written processed file.
+            result: Raw result from the formatting service.
+
+        Returns:
+            Client-facing response dictionary.
+        """
+        self.repository.update(document['id'], {
+            'formatted_path': output_path,
+            'modified_at': datetime.datetime.now().isoformat(),
+        })
+
+        response = {k: v for k, v in result.items() if k != 'output_path'}
+        response['document_id'] = document['id']
+        response['filename'] = os.path.basename(output_path)
+        response['download_url'] = f"/api/documents/{document['id']}/download"
+        return response
 
 # FIXME review text extraction logic and error handling, consider edge cases (e.g. unsupported formats, large files)
     def extract_text(self, document_id: str) -> Dict[str, Any]:
@@ -114,8 +173,8 @@ class DocumentService:
         try:
             text_content = extract_text_from_file(document['file_path'])
 
-            # Store text content in document
-            document['text_content'] = text_content
+            # Persist extracted text on the record
+            self.repository.update(document_id, {'text_content': text_content})
 
             return {
                 'document_id': document_id,
@@ -149,23 +208,20 @@ class DocumentService:
         logger.info(f"Applying formatting to document {document_id}")
 
         document = self.get_document(document_id)
+        from_original = formatting_options.pop('from_original', False)
 
         # Generate output path
-        output_filename = f"formatted_{document['original_filename']}"
+        output_filename = cap_filename(f"formatted_{document['original_filename']}")
         output_path = os.path.join(output_folder, output_filename)
 
-        # Apply formatting
+        # Apply formatting, chaining from the latest processed version
         result = self.formatting_service.apply_formatting(
-            document['file_path'],
+            self._source_path(document, from_original),
             output_path,
             formatting_options
         )
 
-        # Update document record
-        document['formatted_path'] = output_path
-        document['modified_at'] = None  # Add timestamp in production
-
-        return result
+        return self._finalize(document, output_path, result)
 
     def apply_framing(
         self,
@@ -187,24 +243,21 @@ class DocumentService:
         logger.info(f"Applying framing to document {document_id}")
 
         document = self.get_document(document_id)
+        from_original = framing_options.pop('from_original', False)
 
         # Generate output path with "edited_" prefix
         timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-        output_filename = f"edited_{timestamp}_{document['original_filename']}"
+        output_filename = cap_filename(f"edited_{timestamp}_{document['original_filename']}")
         output_path = os.path.join(output_folder, output_filename)
 
-        # Apply framing
+        # Apply framing, chaining from the latest processed version
         result = self.formatting_service.apply_framing(
-            document['file_path'],
+            self._source_path(document, from_original),
             output_path,
             framing_options
         )
 
-        # Update document record
-        document['formatted_path'] = output_path
-        document['modified_at'] = None  # Add timestamp in production
-
-        return result
+        return self._finalize(document, output_path, result)
 
     def apply_spacing(
         self,
@@ -226,24 +279,21 @@ class DocumentService:
         logger.info(f"Applying spacing to document {document_id}")
 
         document = self.get_document(document_id)
+        from_original = spacing_options.pop('from_original', False)
 
-        # Generate output path with "edited_" prefix
+        # Generate output path with "spacing_" prefix
         timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-        output_filename = f"spacing_{timestamp}_{document['original_filename']}"
+        output_filename = cap_filename(f"spacing_{timestamp}_{document['original_filename']}")
         output_path = os.path.join(output_folder, output_filename)
 
-        # Apply framing
+        # Apply spacing, chaining from the latest processed version
         result = self.formatting_service.apply_spacing(
-            document['file_path'],
+            self._source_path(document, from_original),
             output_path,
             spacing_options
         )
 
-        # Update document record
-        document['formatted_path'] = output_path
-        document['modified_at'] = None  # Add timestamp in production
-
-        return result
+        return self._finalize(document, output_path, result)
 
     def apply_keywords(
         self,
@@ -265,24 +315,21 @@ class DocumentService:
         logger.info(f"Applying keyword extraction to document {document_id}")
 
         document = self.get_document(document_id)
+        from_original = keyword_options.pop('from_original', False)
 
         # Generate output path with "keywords_" prefix
         timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-        output_filename = f"keywords_{timestamp}_{document['original_filename']}"
+        output_filename = cap_filename(f"keywords_{timestamp}_{document['original_filename']}")
         output_path = os.path.join(output_folder, output_filename)
 
-        # Apply keyword extraction
+        # Apply keyword extraction, chaining from the latest processed version
         result = self.formatting_service.apply_keywords(
-            document['file_path'],
+            self._source_path(document, from_original),
             output_path,
             keyword_options
         )
 
-        # Update document record
-        document['formatted_path'] = output_path
-        document['modified_at'] = None  # Add timestamp in production
-
-        return result
+        return self._finalize(document, output_path, result)
 
     def apply_highlighting(
         self,
@@ -304,24 +351,21 @@ class DocumentService:
         logger.info(f"Applying part-of-speech highlighting to document {document_id}")
 
         document = self.get_document(document_id)
+        from_original = highlighting_options.pop('from_original', False)
 
         # Generate output path with "highlighted_" prefix
         timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-        output_filename = f"highlighted_{timestamp}_{document['original_filename']}"
+        output_filename = cap_filename(f"highlighted_{timestamp}_{document['original_filename']}")
         output_path = os.path.join(output_folder, output_filename)
 
-        # Apply highlighting
+        # Apply highlighting, chaining from the latest processed version
         result = self.formatting_service.apply_highlighting(
-            document['file_path'],
+            self._source_path(document, from_original),
             output_path,
             highlighting_options
         )
 
-        # Update document record
-        document['formatted_path'] = output_path
-        document['modified_at'] = None  # Add timestamp in production
-
-        return result
+        return self._finalize(document, output_path, result)
 
 # FIXME include a percentage for needed summarization
     def summarize_document(
@@ -346,6 +390,7 @@ class DocumentService:
         # Extract text if not already done
         if not document.get('text_content'):
             self.extract_text(document_id)
+            document = self.get_document(document_id)
 
         text_content = document['text_content']
 
@@ -386,6 +431,7 @@ class DocumentService:
         # Extract text if not already done
         if not document.get('text_content'):
             self.extract_text(document_id)
+            document = self.get_document(document_id)
 
         text_content = document['text_content']
 
@@ -445,7 +491,7 @@ class DocumentService:
             logger.error(f"Error deleting files: {str(e)}")
 
         # Remove from storage
-        del self._documents[document_id]
+        self.repository.delete(document_id)
 
         logger.info(f"Document {document_id} deleted")
         return True

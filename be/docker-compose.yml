@@ -1,0 +1,56 @@
+# Local run for Docker or Podman (no external Ollama install needed):
+#   docker compose up --build      (or)      podman compose up --build
+#
+# This starts two services: the API and a self-contained Ollama instance.
+# On first start the "ollama-pull" step downloads the model into a named
+# volume so subsequent starts are fast.
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # One-shot helper that pulls the model, then exits.
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+    entrypoint: ["ollama", "pull", "llama3.2:3b"]
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: "no"
+
+  api:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      # Talk to the bundled Ollama service over the compose network.
+      OLLAMA_BASE_URL: "http://ollama:11434"
+      OLLAMA_MODEL: "llama3.2:3b"
+      CORS_ORIGINS: "http://localhost:4200"
+      LOG_LEVEL: "INFO"
+    depends_on:
+      ollama:
+        condition: service_healthy
+      ollama-pull:
+        condition: service_completed_successfully
+    # Uploaded files and generated documents are ephemeral; mount volumes here
+    # only if you want to inspect them from the host.
+    # volumes:
+    #   - ./uploads:/app/uploads
+    #   - ./outputs:/app/outputs
+
+volumes:
+  ollama-models:

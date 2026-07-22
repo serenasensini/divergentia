@@ -29,6 +29,7 @@ MANIFEST
 
 # Virtual environments
 venv/
+myvenv/
 env/
 ENV/
 env.bak/
@@ -81,3 +82,8 @@ Thumbs.db
 *.bak
 *.swp
 *~
+tmp/
+path/
+
+# Internal-only documentation (not for the public repository)
+README_INTERNAL.md

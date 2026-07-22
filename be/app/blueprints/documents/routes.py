@@ -2,6 +2,7 @@
 Document API Routes
 """
 import logging
+import os
 from flask import Blueprint, request, jsonify, send_file, current_app
 from werkzeug.exceptions import BadRequest
 
@@ -25,7 +26,8 @@ from app.utils.validators import (
 )
 from app.exceptions.custom_exceptions import (
     FileUploadException,
-    ValidationException
+    ValidationException,
+    DocumentNotFoundException
 )
 
 logger = logging.getLogger(__name__)
@@ -200,23 +202,15 @@ def apply_formatting(document_id: str):
 	"formatting": {
 		"titles": false,
 		"paragraphs": false,
+		"section_titles": false,
 		"paragraphs_titles": false,
 		"captions": false,
 		"bibliography": false,
 		"theme": {
-		  "red_green": {
-			"positive": "#00FF00",
-			"negative": "#FF0000"
-		  },
-		  "blue_orange": {
-			"positive": "#FFA500",
-			"negative": "#0000FF"
-		  },
-		  "purple_yellow": {
-			"positive": "#FFFF00",
-			"negative": "#800080"
-		    }
-		    }
+			"positive": "#FF0000",
+			"negative": "#0000FF",
+			"scheme": "even"
+		}
           }
         }
 
@@ -226,10 +220,11 @@ def apply_formatting(document_id: str):
     Example Response:
         {
             "success": true,
-            "output_path": "/path/to/edited_document.docx",
+            "document_id": "abc-123-def-456",
+            "filename": "formatted_document.docx",
+            "download_url": "/api/documents/abc-123-def-456/download",
             "format": "docx",
-            "borders_applied": 5,
-            "formatting_options": {...}
+            "borders_applied": 5
         }
     """
     logger.info(f"Formatting requested for document {document_id}")
@@ -274,30 +269,13 @@ def apply_framing(document_id: str):
 		"paragraphs": false,
 		"subparagraphs": false,
 		"sentences": false,
-		"colour": ""
-	},
-	"text_coloring": {
-		"enabled": false,
-		"titles": false,
-		"paragraphs": false,
-		"paragraphs_titles": false,
-		"captions": false,
-		"bibliography": false,
-		"theme": {
-		  "red_green": {
-			"positive": "#00FF00",
-			"negative": "#FF0000"
-		  },
-		  "blue_orange": {
-			"positive": "#FFA500",
-			"negative": "#0000FF"
-		  },
-		  "purple_yellow": {
-			"positive": "#FFFF00",
-			"negative": "#800080"
-		  }
-		}
-  }
+		"use_tables": true,
+		"border_style": "single",
+		"border_width": 8,
+		"border_color": "000000",
+		"cell_margin": 100,
+		"preserve_spacing": true
+	}
 }
 
     Returns:
@@ -306,10 +284,11 @@ def apply_framing(document_id: str):
     Example Response:
         {
             "success": true,
-            "output_path": "/path/to/edited_document.docx",
+            "document_id": "abc-123-def-456",
+            "filename": "edited_20260722_document.docx",
+            "download_url": "/api/documents/abc-123-def-456/download",
             "format": "docx",
-            "borders_applied": 5,
-            "framing_options": {...}
+            "borders_applied": 5
         }
     """
     logger.info(f"Framing requested for document {document_id}")
@@ -356,13 +335,16 @@ def apply_spacing(document_id: str):
         }
 
     Returns:
-        JSON response with sacing result
+        JSON response with spacing result
 
     Example Response:
         {
             "success": true,
-            "output_path": "/path/to/edited_document.docx",
+            "document_id": "abc-123-def-456",
+            "filename": "spacing_20260722_document.docx",
+            "download_url": "/api/documents/abc-123-def-456/download",
             "format": "docx",
+            "spacing_applied": 12
         }
     """
     logger.info(f"Spacing requested for document {document_id}")
@@ -447,15 +429,12 @@ def add_keywords(document_id: str):
         JSON response (200 OK):
         {
             "success": true,
-            "output_path": str,                   // Path del file generato
+            "document_id": str,                   // ID per download/chaining
+            "filename": str,                      // Nome del file generato
+            "download_url": str,                  // URL per scaricare il risultato
             "format": "docx",
             "sections_processed": int,            // Numero di sezioni elaborate
             "total_keywords": int,                // Totale keywords estratte
-            "keyword_options": {                  // Opzioni utilizzate
-                "max_keywords": int,
-                "include_proper_nouns": bool,
-                "model": str | null
-            },
             "extraction_method": str,             // "Ollama", "spaCy", o
                                                   // "Ollama with spaCy fallback"
             "ollama_used": bool,                  // True se Ollama è stato usato
@@ -509,15 +488,12 @@ def add_keywords(document_id: str):
     Example Response - Successo con Ollama:
         {
             "success": true,
-            "output_path": "/path/to/keywords_20260226120000_document.docx",
+            "document_id": "abc-123-def-456",
+            "filename": "keywords_20260226120000_document.docx",
+            "download_url": "/api/documents/abc-123-def-456/download",
             "format": "docx",
             "sections_processed": 5,
             "total_keywords": 35,
-            "keyword_options": {
-                "max_keywords": 7,
-                "include_proper_nouns": true,
-                "model": "llama2"
-            },
             "extraction_method": "Ollama",
             "ollama_used": true,
             "spacy_fallback_used": false
@@ -526,14 +502,12 @@ def add_keywords(document_id: str):
     Example Response - Nessuna sezione trovata:
         {
             "success": true,
-            "output_path": "/path/to/keywords_20260226120000_document.docx",
+            "document_id": "abc-123-def-456",
+            "filename": "keywords_20260226120000_document.docx",
+            "download_url": "/api/documents/abc-123-def-456/download",
             "format": "docx",
             "sections_processed": 0,
             "total_keywords": 0,
-            "keyword_options": {...},
-            "extraction_method": "N/A",
-            "ollama_used": false,
-            "spacy_fallback_used": false,
             "note": "No sections found in document"
         }
 
@@ -669,7 +643,9 @@ def apply_pos_highlighting(document_id: str):
         JSON response (200 OK):
         {
             "success": true,
-            "output_path": str,                   // Path to formatted document
+            "document_id": str,                   // ID for download/chaining
+            "filename": str,                      // Generated file name
+            "download_url": str,                  // URL to download the result
             "format": "docx",
             "words_formatted": int,               // Total words formatted
             "paragraphs_processed": int,          // Number of paragraphs processed
@@ -780,7 +756,9 @@ def apply_pos_highlighting(document_id: str):
     Example Response - Success:
         {
             "success": true,
-            "output_path": "/path/to/highlighted_20260301120000_document.docx",
+            "document_id": "abc-123-def-456",
+            "filename": "highlighted_20260301120000_document.docx",
+            "download_url": "/api/documents/abc-123-def-456/download",
             "format": "docx",
             "words_formatted": 145,
             "paragraphs_processed": 23,
@@ -852,7 +830,7 @@ def apply_pos_highlighting(document_id: str):
 
     return jsonify(result), 200
 
-@documents_bp.route('/documents/<document_id>/styles', methods=['POST'])
+@documents_bp.route('/documents/<document_id>/styles', methods=['GET'])
 def get_document_styles(document_id: str):
     """
     Get available formatting styles for document.
@@ -1067,13 +1045,19 @@ def download_document(document_id: str):
     document_service = get_document_service()
     document = document_service.get_document(document_id)
 
-    # Determine which file to send
+    # Serve the latest processed version if present, else the original upload.
     file_path = document.get('formatted_path') or document['file_path']
+    if not file_path or not os.path.exists(file_path):
+        raise DocumentNotFoundException(document_id)
+
+    # Name the download after the processed file so chained edits are reflected.
+    download_name = os.path.basename(file_path) if document.get('formatted_path') \
+        else document['original_filename']
 
     return send_file(
         file_path,
         as_attachment=True,
-        download_name=document['original_filename']
+        download_name=download_name
     )
 
 

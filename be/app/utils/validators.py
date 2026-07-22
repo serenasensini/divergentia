@@ -16,19 +16,30 @@ class UploadRequestSchema(BaseModel):
 
 class FramingOptionsSchema(BaseModel):
     """Schema for framing/border options"""
-    sections: bool = Field(False, description="Apply borders to sections")
-    paragraphs: bool = Field(False, description="Apply borders to paragraphs")
-    subparagraphs: bool = Field(False, description="Apply borders to subparagraphs")
-    sentences: bool = Field(False, description="Apply borders to sentences")
-    use_tables: bool = Field(False, description="Use tables for framing")
+    sections: bool = Field(False, description="Frame each section in one single-cell table")
+    paragraphs: bool = Field(False, description="Frame each paragraph in its own single-cell table")
+    subparagraphs: bool = Field(False, description="Frame subparagraphs in their own tables")
+    sentences: bool = Field(False, description="Frame each sentence in its own single-cell table")
+    use_tables: bool = Field(True, description="Use single-cell tables for framing (recommended)")
     border_color: Optional[str] = Field(None, description="Border color in hex format")
-    border_style: Optional[str] = Field(None, description="Border style (e.g., solid, dashed, dotted)")
-    border_width: Optional[int] = Field(None, ge=1, le=16, description="Border width in points (1-16)")
+    border_style: Optional[str] = Field(None, description="Border style (single, double, dashed, dotted, ...)")
+    border_width: Optional[int] = Field(None, ge=1, le=48, description="Border width in eighths of a point (8 = 1pt)")
+    cell_margin: Optional[int] = Field(None, ge=0, le=1440, description="Cell inner margin in twips (1/1440 inch)")
+    preserve_spacing: bool = Field(True, description="Preserve original paragraph spacing")
+    from_original: bool = Field(False, description="Start from the original upload instead of chaining onto previous edits")
+
+    @validator('border_color')
+    def validate_border_color(cls, v):
+        """Validate hex color format (with or without #)."""
+        if v is not None and not re.match(r'^#?[0-9A-Fa-f]{6}$', v):
+            raise ValueError('Border color must be in hex format (e.g., #FF0000 or FF0000)')
+        return v
 
 class SpacingOptionsSchema(BaseModel):
     """Schema for spacing options"""
     paragraphs: bool = Field(False, description="Apply space to paragraphs")
     sentences: bool = Field(False, description="Apply space to sentences")
+    from_original: bool = Field(False, description="Start from the original upload instead of chaining onto previous edits")
 
 
 class KeywordOptionsSchema(BaseModel):
@@ -36,6 +47,7 @@ class KeywordOptionsSchema(BaseModel):
     max_keywords: Optional[int] = Field(5, ge=1, le=10, description="Maximum number of keywords per section")
     include_proper_nouns: Optional[bool] = Field(True, description="Include proper nouns (names, places)")
     model: Optional[str] = Field(None, description="Ollama model to use for keyword extraction (e.g., 'llama2', 'mistral')")
+    from_original: bool = Field(False, description="Start from the original upload instead of chaining onto previous edits")
 
 
 class HighlightingOptionsSchema(BaseModel):
@@ -49,6 +61,7 @@ class HighlightingOptionsSchema(BaseModel):
     verbs: Optional[bool] = Field(False, description="Format verbs")
     adjectives: Optional[bool] = Field(False, description="Format adjectives")
     adverbs: Optional[bool] = Field(False, description="Format adverbs")
+    from_original: bool = Field(False, description="Start from the original upload instead of chaining onto previous edits")
 
     @validator('color')
     def validate_color(cls, v):
@@ -98,12 +111,21 @@ class FormattingOptionsSchema(BaseModel):
     bold: Optional[bool] = Field(None, description="Apply bold formatting")
     italic: Optional[bool] = Field(None, description="Apply italic formatting")
     alignment: Optional[str] = Field(None, description="Text alignment")
-    titles: Optional[bool] = Field(None, description="Apply titles formatting")
-    paragraphs: Optional[bool] = Field(None, description="Apply paragraphs formatting")
-    paragraphs_titles: Optional[bool] = Field(None, description="Apply paragraphs and titles formatting")
+    titles: Optional[bool] = Field(None, description="Apply document title formatting (Title style)")
+    paragraphs: Optional[bool] = Field(None, description="Apply body text (paragraphs) formatting")
+    section_titles: Optional[bool] = Field(None, description="Apply section title formatting (Heading 1 / Markdown #)")
+    paragraphs_titles: Optional[bool] = Field(None, description="Apply paragraph title formatting (Heading 2+ / Markdown ##+)")
     captions: Optional[bool] = Field(None, description="Apply captions formatting")
     bibliography: Optional[bool] = Field(None, description="Apply bibliography formatting")
-    theme: Optional[Dict[str, str]] = Field(None, description="Apply theme formatting")
+    from_original: bool = Field(False, description="Start from the original upload instead of chaining onto previous edits")
+    theme: Optional[Dict[str, str]] = Field(
+        None,
+        description=(
+            "Theme colors. Keys: 'positive'/'negative' seed hex colors and an "
+            "optional 'scheme' (complementary, triadic, tetradic, even, analogous) "
+            "used to derive additional colors when more than two roles are colored."
+        ),
+    )
 
     @validator('font_color')
     def validate_color(cls, v):
@@ -113,6 +135,27 @@ class FormattingOptionsSchema(BaseModel):
             color = v.lstrip('#')
             if not re.match(r'^[0-9A-Fa-f]{6}$', color):
                 raise ValueError('Color must be in hex format (e.g., #FF0000 or FF0000)')
+        return v
+
+    @validator('theme')
+    def validate_theme(cls, v):
+        """Validate theme seed colors and palette scheme."""
+        if v is None:
+            return v
+        allowed_schemes = ('complementary', 'triadic', 'tetradic', 'even', 'analogous')
+        for key in ('positive', 'negative'):
+            color = v.get(key)
+            if color is not None and not re.match(r'^#?[0-9A-Fa-f]{6}$', color):
+                raise ValueError(
+                    f"Theme '{key}' must be in hex format (e.g., #FF0000 or FF0000)"
+                )
+        scheme = v.get('scheme')
+        if scheme is not None and scheme.lower() not in allowed_schemes:
+            raise ValueError(
+                f"Theme 'scheme' must be one of: {', '.join(allowed_schemes)}"
+            )
+        if scheme is not None:
+            v['scheme'] = scheme.lower()
         return v
 
     @validator('alignment')

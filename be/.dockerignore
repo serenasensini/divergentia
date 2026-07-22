@@ -1,0 +1,36 @@
+# Virtual environments
+venv/
+.venv/
+myvenv/
+env/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Tests and dev tooling (not needed at runtime)
+tests/
+.pre-commit-config.yaml
+.pylintrc
+requirements-dev.txt
+
+# Local data / generated files
+uploads/*
+outputs/*
+tmp/
+*.log
+.env
+
+# Docs and project notes
+*.md
+!README.md
+
+# VCS / IDE
+.git/
+.gitignore
+.idea/
+.vscode/

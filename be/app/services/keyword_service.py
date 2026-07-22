@@ -36,10 +36,20 @@ class KeywordService:
                 self.nlp = spacy.load("it_core_news_lg-3.8.0")
                 logger.info("Italian spaCy model downloaded and loaded successfully")
 
-            # Add sentencizer if not already in pipeline
-            if "sentencizer" not in self.nlp.pipe_names:
+            # Only add the rule-based sentencizer when the loaded pipeline has no
+            # component that already sets sentence boundaries. Stacking the
+            # sentencizer on top of a model that ships a "parser"/"senter"
+            # component makes both set token.is_sent_start and can corrupt
+            # doc.sents (sentences fragmented down to single tokens).
+            boundary_setters = {"parser", "senter", "sentencizer"}
+            if not boundary_setters.intersection(self.nlp.pipe_names):
                 self.nlp.add_pipe("sentencizer")
                 logger.info("Sentencizer added to spaCy pipeline")
+            else:
+                logger.info(
+                    "Sentence boundaries already provided by pipeline "
+                    f"({', '.join(self.nlp.pipe_names)}); sentencizer not added"
+                )
 
         except Exception as e:
             logger.error(f"Failed to load spaCy model: {str(e)}")
@@ -94,12 +104,58 @@ class KeywordService:
             logger.error(f"Error extracting keywords: {str(e)}")
             return []
 
-    def format_keywords(self, keywords: List[str]) -> str:
+    # Localised labels for the keyword prefix, keyed by ISO 639-1 language code.
+    # English is used as the fallback for any undetected/unlisted language.
+    KEYWORD_LABELS = {
+        'it': 'Parole chiave',
+        'en': 'Keywords',
+        'es': 'Palabras clave',
+        'fr': 'Mots-clés',
+        'de': 'Schlüsselwörter',
+        'pt': 'Palavras-chave',
+        'nl': 'Trefwoorden',
+        'ca': 'Paraules clau',
+        'ro': 'Cuvinte cheie',
+    }
+    DEFAULT_KEYWORD_LANGUAGE = 'en'
+
+    def detect_language(self, text: str) -> str:
+        """
+        Detect the language of a text and return its ISO 639-1 code.
+
+        Uses the ``langdetect`` library. Falls back to the default language
+        when the text is too short/ambiguous or detection fails.
+
+        Args:
+            text: Text to analyse
+
+        Returns:
+            ISO 639-1 language code (e.g. "it", "en")
+        """
+        if not text or not text.strip():
+            return self.DEFAULT_KEYWORD_LANGUAGE
+
+        try:
+            from langdetect import detect, DetectorFactory
+            # Make detection deterministic across runs.
+            DetectorFactory.seed = 0
+            language = detect(text)
+            logger.debug(f"Detected language '{language}' for keyword prefix")
+            return language
+        except Exception as e:
+            logger.warning(f"Language detection failed ({str(e)}); using default language")
+            return self.DEFAULT_KEYWORD_LANGUAGE
+
+    def format_keywords(self, keywords: List[str], language: Optional[str] = None) -> str:
         """
         Format keywords list into a readable string.
 
         Args:
             keywords: List of keywords
+            language: ISO 639-1 code of the text the keywords come from. When
+                omitted the prefix defaults to English. The prefix label is
+                localised (e.g. "Parole chiave" for Italian, "Keywords" for
+                English).
 
         Returns:
             Formatted string of keywords
@@ -107,8 +163,12 @@ class KeywordService:
         if not keywords:
             return ""
 
-        # Format as: "Parole chiave: keyword1, keyword2, keyword3"
-        return f"Parole chiave: {', '.join(keywords)}"
+        label = self.KEYWORD_LABELS.get(
+            language or self.DEFAULT_KEYWORD_LANGUAGE,
+            self.KEYWORD_LABELS[self.DEFAULT_KEYWORD_LANGUAGE],
+        )
+        # Format as: "<localised label>: keyword1, keyword2, keyword3"
+        return f"{label}: {', '.join(keywords)}"
 
     def analyze_pos(self, text: str) -> List[Dict[str, str]]:
         """
@@ -242,6 +302,21 @@ class KeywordService:
 
             # Extract sentences
             sentences = [sent.text.strip() for sent in doc.sents if sent.text.strip()]
+
+            # Sanity check: a healthy split yields roughly one sentence per
+            # sentence-ending punctuation mark. If the pipeline over-fragments
+            # the text (e.g. one "sentence" per token), fall back to regex so we
+            # never split the paragraph word-by-word.
+            import re
+            terminators = len(re.findall(r'[.!?]+', text))
+            if sentences and len(sentences) > max(terminators, 1) + 1:
+                logger.warning(
+                    f"spaCy produced {len(sentences)} fragments for "
+                    f"{terminators} terminators; using regex sentence split"
+                )
+                sentences = [
+                    s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if s.strip()
+                ]
 
             logger.debug(f"Split text into {len(sentences)} sentences")
             return sentences

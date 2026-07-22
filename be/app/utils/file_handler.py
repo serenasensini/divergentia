@@ -16,6 +16,39 @@ from app.exceptions.custom_exceptions import (
 
 logger = logging.getLogger(__name__)
 
+# Most Linux filesystems (ext4, xfs, ...) cap a single path component at 255
+# bytes. We keep well under that so downstream code can still prepend prefixes
+# (e.g. "spacing_<timestamp>_") and suffixes without hitting ENAMETOOLONG,
+# which otherwise surfaces to the client as a 400 (upload) or 422 (processing).
+MAX_FILENAME_LENGTH = 200
+
+
+def cap_filename(filename: str, max_len: int = MAX_FILENAME_LENGTH) -> str:
+    """Ensure a filename stays within filesystem length limits.
+
+    The extension is always preserved; only the stem is truncated (from the
+    end) when the whole name would exceed ``max_len``. This prevents unbounded
+    growth when processed files are downloaded and re-uploaded/re-processed.
+
+    Args:
+        filename: The proposed filename (no directory component).
+        max_len: Maximum allowed length for the resulting filename.
+
+    Returns:
+        A filename whose length is at most ``max_len``.
+    """
+    if len(filename) <= max_len:
+        return filename
+
+    path = Path(filename)
+    ext = path.suffix
+    stem = path.stem
+    keep = max_len - len(ext)
+    if keep < 1:
+        # Pathological case: the extension alone is too long.
+        return filename[:max_len]
+    return stem[:keep] + ext
+
 
 def validate_file(filename: str, file_size: int) -> Tuple[bool, Optional[str]]:
     """
@@ -72,6 +105,14 @@ def save_uploaded_file(file, upload_folder: str) -> Tuple[str, str]:
         unique_id = uuid.uuid4().hex[:8]
         file_extension = Path(secured).suffix
         filename_without_ext = Path(secured).stem
+
+        # Cap the human-readable stem so the final name (stem + "_" + 8-char id
+        # + extension) stays within filesystem limits even when the uploaded
+        # file already carries a long, previously-accumulated name.
+        max_stem = MAX_FILENAME_LENGTH - len(file_extension) - (len(unique_id) + 1)
+        if max_stem > 0 and len(filename_without_ext) > max_stem:
+            filename_without_ext = filename_without_ext[:max_stem]
+
         unique_filename = f"{filename_without_ext}_{unique_id}{file_extension}"
 
         # Create upload folder if it doesn't exist

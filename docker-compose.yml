@@ -10,7 +10,8 @@ services:
     environment:
       - FLASK_ENV=production
       - OLLAMA_BASE_URL=http://ollama:11434
-      - CORS_ORIGINS=http://localhost:4200
+      - OLLAMA_MODEL=llama3.2:3b
+      - CORS_ORIGINS=http://localhost:8080
     volumes:
       - ./be/uploads:/app/uploads
       - ./be/outputs:/app/outputs
@@ -21,12 +22,24 @@ services:
       - divergentia-network
     restart: unless-stopped
 
+  # Front-end (Vite build served by Nginx, proxying /api -> api service)
+  web:
+    build: ./fe
+    container_name: divergentia-web
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+    networks:
+      - divergentia-network
+    restart: unless-stopped
+
   # Ollama Service
   ollama:
-    image: ollama/ollama:latest
+    image: docker.io/ollama/ollama:0.32.2
     container_name: divergentia-ollama
     ports:
-      - "11434:11434"
+      - "11435:11434"
     volumes:
       - ollama-data:/root/.ollama
     networks:

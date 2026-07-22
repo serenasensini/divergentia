@@ -8,6 +8,15 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Project base directory (the `be` folder, parent of the `app` package).
+# Used to anchor file paths so they don't depend on the current working directory.
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+
+
+def _resolve_path(value: str) -> str:
+    """Resolve a path against BASE_DIR unless it is already absolute."""
+    return value if os.path.isabs(value) else os.path.join(BASE_DIR, value)
+
 
 class Config:
     """Base configuration class"""
@@ -35,8 +44,8 @@ class Config:
     # File Upload Configuration
     MAX_UPLOAD_SIZE = int(os.getenv('MAX_UPLOAD_SIZE', 10485760))  # 10MB default
     ALLOWED_EXTENSIONS = set(os.getenv('ALLOWED_EXTENSIONS', 'pdf,docx,doc,txt,rtf').split(','))
-    UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
-    OUTPUT_FOLDER = os.getenv('OUTPUT_FOLDER', 'outputs')
+    UPLOAD_FOLDER = _resolve_path(os.getenv('UPLOAD_FOLDER', 'uploads'))
+    OUTPUT_FOLDER = _resolve_path(os.getenv('OUTPUT_FOLDER', 'outputs'))
 
     # Rate Limiting
     RATE_LIMIT_ENABLED = os.getenv('RATE_LIMIT_ENABLED', 'True').lower() == 'true'
@@ -50,9 +59,6 @@ class Config:
     # Logging Configuration
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
     LOG_FILE = os.getenv('LOG_FILE', 'app.log')
-
-    # Database Configuration (optional for future expansion)
-    DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///documents.db')
 
     # Security Configuration
     SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'True').lower() == 'true'
@@ -112,9 +118,8 @@ class TestingConfig(Config):
     TESTING = True
     DEBUG = True
     RATE_LIMIT_ENABLED = False
-    UPLOAD_FOLDER = 'test_uploads'
-    OUTPUT_FOLDER = 'test_outputs'
-    DATABASE_URL = 'sqlite:///:memory:'
+    UPLOAD_FOLDER = _resolve_path('test_uploads')
+    OUTPUT_FOLDER = _resolve_path('test_outputs')
 
 
 # Configuration dictionary

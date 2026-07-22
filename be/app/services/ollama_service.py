@@ -57,10 +57,14 @@ class OllamaService:
         self.timeout = current_app.config.get('OLLAMA_TIMEOUT', 120)
         self.max_retries = current_app.config.get('OLLAMA_MAX_RETRIES', 3)
 
+        # Explicit client bound to the configured base URL so requests are not
+        # sent to the library default host (127.0.0.1:11434).
+        self._client = ollama.Client(host=self.base_url)
+
         # Cache for repeated requests (simple in-memory cache)
         self._cache: Dict[str, Any] = {}
 
-        logger.info(f"Ollama service initialized with model: {self.model}")
+        logger.info(f"Ollama service initialized with model: {self.model} at {self.base_url}")
 
     def _get_cache_key(self, operation: str, text: str, **kwargs) -> str:
         """Generate cache key for request"""
@@ -90,7 +94,7 @@ class OllamaService:
             OllamaProcessingException: If processing fails
         """
         try:
-            response = ollama.generate(
+            response = self._client.generate(
                 model=self.model,
                 prompt=prompt,
                 stream=stream,
@@ -492,17 +496,41 @@ Paraphrased text:"""
         """
         Check if Ollama service is available.
 
+        This is intentionally lightweight: it only verifies that the Ollama
+        server is reachable and that the configured model is installed, using
+        the models listing endpoint. It deliberately avoids running a real
+        text generation, which would load the model into memory and make the
+        (frequently polled) health endpoint slow.
+
         Returns:
             Dictionary with health status
         """
         try:
-            # Try a simple generation
-            response = self._generate_completion("Hello", stream=False)
+            # Lightweight availability probe: list installed models.
+            listed = self._client.list()
+            models = listed.get('models', []) if isinstance(listed, dict) else []
+
+            def _model_name(entry: Any) -> str:
+                if isinstance(entry, dict):
+                    return entry.get('name') or entry.get('model') or ''
+                # ollama client may return objects with a ``model`` attribute
+                return getattr(entry, 'model', '') or getattr(entry, 'name', '')
+
+            available_models = {_model_name(m) for m in models}
+            # Match with or without an explicit ":latest" tag.
+            model_present = (
+                self.model in available_models
+                or f"{self.model}:latest" in available_models
+                or any(name.split(':', 1)[0] == self.model.split(':', 1)[0]
+                       for name in available_models)
+            )
+
             return {
-                'status': 'healthy',
+                'status': 'healthy' if model_present else 'degraded',
                 'model': self.model,
                 'base_url': self.base_url,
-                'available': True
+                'available': model_present,
+                'installed_models': sorted(available_models),
             }
         except Exception as e:
             logger.error(f"Health check failed: {str(e)}")

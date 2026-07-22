@@ -10,11 +10,18 @@ from docx import Document
 from docx.shared import Pt, RGBColor
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
+from docx.text.paragraph import Paragraph
 # import pymupdf  # PyMuPDF
 
 from app.exceptions.custom_exceptions import (
     FormattingException,
 )
+from app.services.document_structure_service import (
+    BlockType,
+    DocumentStructure,
+    get_document_structure_service,
+)
+from app.utils.color_utils import DEFAULT_SCHEME, generate_palette
 
 logger = logging.getLogger(__name__)
 
@@ -45,58 +52,77 @@ class FormattingService:
     DEFAULT_TABLE_BORDER_WIDTH = 8  # 1 pt = 8 eighths of a point
     DEFAULT_TABLE_CELL_MARGIN = 100  # Twips (1/1440 inch) - approx 1.76mm
     DEFAULT_TABLE_SPACING = 120  # Twips - spacing between table boxes
+
+    # Per-part default border styles/widths, so sections, paragraphs and
+    # sentences are visually distinguishable when framed with tables. Widths are
+    # in eighths of a point. These apply only when the request does not specify
+    # an explicit border_style / border_width.
+    SECTION_BORDER_STYLE = "double"
+    SECTION_BORDER_WIDTH = 16   # 2 pt
+    PARAGRAPH_BORDER_STYLE = "single"
+    PARAGRAPH_BORDER_WIDTH = 8  # 1 pt
+    SENTENCE_BORDER_STYLE = "dashed"
+    SENTENCE_BORDER_WIDTH = 4   # 1/2 pt
     
     # Font size validation
     MIN_FONT_SIZE = 6  # Minimum font size in points
     MAX_FONT_SIZE = 72  # Maximum font size in points
 
+    # Spacing for list items (ordered/unordered). Instead of inserting blank
+    # lines, list entries get a padding above and below each element. ~10px at
+    # 96 dpi (1px = 0.75pt) => 7.5pt of space before/after.
+    LIST_ITEM_SPACING_PT = 7.5
+
+    # Space added after an inserted keywords paragraph so the keywords are
+    # separated from the following section content. Twips (1pt = 20 twips) =>
+    # 200 twips = 10pt.
+    KEYWORD_SPACING_AFTER_TWIPS = 200
+
     def __init__(self) -> None:
         """Initialize formatting service"""
+        self._structure_service = get_document_structure_service()
         logger.info("Formatting service initialized")
+
+    def _build_structure(self, doc: Document, source_path: Optional[str] = None) -> DocumentStructure:
+        """
+        Build the canonical structural model of a document.
+
+        The structure is computed once per operation and passed to the various
+        ``_identify_*`` helpers, so heading/section/paragraph detection is
+        consistent and based on style outline levels (with a Markdown fallback).
+
+        Args:
+            doc: python-docx Document object
+            source_path: Original .docx path (enables the Markdown fallback)
+
+        Returns:
+            DocumentStructure describing every paragraph
+        """
+        return self._structure_service.build(doc, source_path=source_path)
 
     def _is_heading(self, para, check_font_size: bool = True, font_size_threshold: float = None) -> bool:
         """
-        Check if a paragraph is a heading based on style and optionally font size.
+        Check if a paragraph is a heading (section delimiter).
 
-        A paragraph is considered a heading if:
-        - Its style name contains 'Heading', OR
-        - Its font size is greater than the threshold (if check_font_size is True)
+        Classification is delegated to the DocumentStructureService: the
+        paragraph style outline level is used first, and only when the style
+        carries no heading information (and ``check_font_size`` is True) a
+        font-size/bold heuristic is applied.
 
         Args:
             para: python-docx paragraph object
-            check_font_size: Whether to check font size in addition to style (default: True)
-            font_size_threshold: Font size threshold in points (default: HEADING_FONT_SIZE_THRESHOLD)
+            check_font_size: Whether to allow the heuristic fallback
+            font_size_threshold: Unused, kept for backward compatibility
 
         Returns:
             bool: True if paragraph is a heading, False otherwise
         """
-        if font_size_threshold is None:
-            font_size_threshold = self.HEADING_FONT_SIZE_THRESHOLD
-        
-        style_name = para.style.name
-
-        # Check if style contains 'Heading'
-        if 'Heading' in style_name:
-            logger.debug(f"Heading style found: {style_name}")
-            return True
-
-        # Optionally check font size
-        if check_font_size:
-            font_size = self._get_paragraph_font_size(para)
-            logger.debug(f"Font size found: {font_size}")
-            # Check if font size is greater than threshold, or equal to threshold with a bold style (common for headings)
-            if (font_size is not None and font_size > font_size_threshold) or (font_size == font_size_threshold and 'bold' in style_name.lower()):
-                logger.debug(f"Font size is {font_size} pt, which meets the heading threshold of {font_size_threshold} pt")
-                return True
-            elif para.runs and any(run.font.bold for run in para.runs):
-                logger.debug("Paragraph has bold runs, which may indicate a heading")
-                return True
-
-        return False
+        block = self._structure_service.classify_paragraph(para, use_heuristic=check_font_size)
+        return block.is_heading
 
     def _is_main_title(self, para) -> bool:
         """
-        Check if a paragraph is a main title (Heading 1).
+        Check if a paragraph is a main/document title (Title style or Heading 1).
 
         Args:
             para: python-docx paragraph object
@@ -104,12 +130,11 @@ class FormattingService:
         Returns:
             bool: True if paragraph is a main title, False otherwise
         """
-        style_name = para.style.name
-        return 'Heading 1' in style_name
+        return self._structure_service.classify_paragraph(para).type == BlockType.DOCUMENT_TITLE
 
     def _is_section_heading(self, para) -> bool:
         """
-        Check if a paragraph is a section heading (Heading 2, 3, 4, etc. but not Heading 1).
+        Check if a paragraph is a section heading (Heading 2, 3, 4, ...).
 
         Args:
             para: python-docx paragraph object
@@ -117,9 +142,7 @@ class FormattingService:
         Returns:
             bool: True if paragraph is a section heading, False otherwise
         """
-        style_name = para.style.name
-        # Check if style contains 'Heading' but is not 'Heading 1', or if it has bold formatting (common for section headings) or underlined (another common style for section headings)
-        return ('Heading' in style_name and 'Heading 1' not in style_name) or (para.runs and all(run.font.bold for run in para.runs)) or (para.runs and all(run.font.underline for run in para.runs))
+        return self._structure_service.classify_paragraph(para).type == BlockType.SECTION_HEADING
 
     def _get_paragraph_font_size(self, para) -> Optional[float]:
         """
@@ -414,25 +437,23 @@ class FormattingService:
             "formatting": {
                 "titles": false,
                 "paragraphs": false,
+                "section_titles": false,
                 "paragraphs_titles": false,
                 "captions": false,
                 "bibliography": false,
                 "theme": {
-                  "red_green": {
-                    "positive": "#00FF00",
-                    "negative": "#FF0000"
-                  },
-                  "blue_orange": {
-                    "positive": "#FFA500",
-                    "negative": "#0000FF"
-                  },
-                  "purple_yellow": {
-                    "positive": "#FFFF00",
-                    "negative": "#800080"
-                  }
+                  "positive": "#FF0000",
+                  "negative": "#0000FF",
+                  "scheme": "even"
                 }
             }
         }
+
+        The ``theme`` provides up to two seed colors (``positive`` /
+        ``negative``). When more than two roles are colored at once, extra
+        colors are derived from the seeds using the ``scheme`` harmony
+        (complementary, triadic, tetradic, even, analogous) so every enabled
+        role receives a distinct color.
 
         Returns:
             Result information
@@ -443,34 +464,44 @@ class FormattingService:
             doc = Document(input_path)
             paragraphs_modified = 0
 
-            # Apply formatting based on specific options (e.g. only to titles, paragraphs, etc.)
+            # Build the structural model once for this operation
+            structure = self._build_structure(doc, source_path=input_path)
             logger.debug(f"Options received for formatting: {options}")
 
             theme = options.get('theme')
             logger.debug(f"Received theme option: {theme}")
             primary_col = theme.get('positive') if theme else None
             secondary_col = theme.get('negative') if theme else None
-            logger.debug(f"Primary color: {primary_col}, Secondary color: {secondary_col}")
+            scheme = (theme.get('scheme') if theme else None) or DEFAULT_SCHEME
+            logger.debug(f"Primary color: {primary_col}, Secondary color: {secondary_col}, scheme: {scheme}")
 
-            colors = [primary_col, secondary_col]
-
-            # Map options to their corresponding identification methods
+            # Map options to their corresponding identification methods.
+            # The order is canonical so palette assignment is deterministic.
             formatting_tasks = [
                 ('titles', self._identify_main_title, 'main titles'),
                 ('paragraphs', self._identify_paragraphs, 'paragraphs'),
-                ('paragraphs_titles', self._identify_section_titles, 'section titles'),
+                ('section_titles', self._identify_section_titles, 'section titles'),
+                ('paragraphs_titles', self._identify_paragraph_titles, 'paragraph titles'),
                 ('captions', self._identify_image_captions, 'image captions')
             ]
 
-            for option_key, identify_method, label in formatting_tasks:
-                if options.get(option_key):
-                    indices = identify_method(doc)
-                    logger.debug(f"Found {label}: {indices}")
-                    # Apply theme-based formatting according to the specified theme
-                    self._apply_color_to_indices(doc, indices, colors, label)
+            # Build a harmonized palette sized to the number of enabled roles so
+            # each colored role gets a distinct, related color (derived from the
+            # user's positive/negative seeds via the chosen color-wheel scheme).
+            enabled_tasks = [t for t in formatting_tasks if options.get(t[0])]
+            palette = generate_palette([primary_col, secondary_col], len(enabled_tasks), scheme)
+            logger.debug(f"Generated palette for {len(enabled_tasks)} roles: {palette}")
 
-            if options.get('captions'):
-                pass
+            for color, (option_key, identify_method, label) in zip(palette, enabled_tasks):
+                indices = identify_method(doc, structure)
+                logger.debug(f"Found {label}: {indices}")
+                # Apply the palette color assigned to this role
+                color_rgb = self._apply_color_to_indices(doc, indices, color, label)
+                # Captions may also live inside text boxes anchored to images,
+                # which are not part of doc.paragraphs: color those too.
+                if option_key == 'captions':
+                    self._color_textbox_captions(doc, color_rgb)
+
             if options.get('bibliography'):
                 pass
 
@@ -599,31 +630,72 @@ class FormattingService:
         self,
         doc: Document,
         indices: List[int],
-        colors: List[str],
+        color: Optional[str],
         label: str
-    ) -> None:
+    ) -> Optional[tuple]:
         """
-        Apply color to paragraph runs at specified indices.
+        Apply a single color to paragraph runs at the specified indices.
 
         Args:
             doc: python-docx Document object
             indices: List of paragraph indices to color
-            colors: List of available colors (will pop from front)
+            color: Hex color to apply (``#RRGGBB``), or None to skip
             label: Label for logging purposes
-        """
-        if not colors:
-            logger.warning(f"No colors available for {label}")
-            return
 
-        color = colors.pop(0)
-        if color:
-            color_rgb = self._parse_color(color)
-            logger.debug(f"Parsed color RGB for {label}: {color_rgb}")
-            if color_rgb:
-                for idx in indices:
-                    for run in doc.paragraphs[idx].runs:
-                        run.font.color.rgb = RGBColor(*color_rgb)
-        logger.debug(f"Remaining colors after processing {label}: {colors}")
+        Returns:
+            The RGB tuple that was applied, or None if no color was available.
+        """
+        if not color:
+            logger.warning(f"No color available for {label}")
+            return None
+
+        color_rgb = self._parse_color(color)
+        logger.debug(f"Parsed color RGB for {label}: {color_rgb}")
+        if color_rgb:
+            for idx in indices:
+                for run in doc.paragraphs[idx].runs:
+                    run.font.color.rgb = RGBColor(*color_rgb)
+        return color_rgb
+
+    def _iter_textbox_paragraphs(self, doc: Document) -> List[Paragraph]:
+        """
+        Return the paragraphs contained in text boxes (``w:txbxContent``).
+
+        Captions produced by Word's "Insert Caption" on a floating image are
+        stored inside a text box anchored to the drawing, so they never appear
+        in ``doc.paragraphs``. This helper exposes them as python-docx
+        Paragraph objects so they can be inspected and formatted.
+        """
+        paragraphs: List[Paragraph] = []
+        for txbx in doc.element.body.iter(qn('w:txbxContent')):
+            for p_element in txbx.iter(qn('w:p')):
+                paragraphs.append(Paragraph(p_element, doc))
+        return paragraphs
+
+    def _color_textbox_captions(self, doc: Document, color_rgb: Optional[tuple]) -> int:
+        """
+        Color caption paragraphs that live inside text boxes.
+
+        Args:
+            doc: python-docx Document object
+            color_rgb: RGB tuple to apply (no-op if None)
+
+        Returns:
+            Number of textbox caption paragraphs colored.
+        """
+        if not color_rgb:
+            return 0
+
+        colored = 0
+        for paragraph in self._iter_textbox_paragraphs(doc):
+            block = self._structure_service.classify_paragraph(paragraph)
+            if block.type == BlockType.CAPTION:
+                for run in paragraph.runs:
+                    run.font.color.rgb = RGBColor(*color_rgb)
+                colored += 1
+                logger.debug(f"Colored textbox caption: '{paragraph.text[:50]}...'")
+        logger.info(f"Colored {colored} textbox caption paragraph(s)")
+        return colored
 
     def _add_paragraph_border(self, paragraph) -> None:
         """
@@ -667,13 +739,74 @@ class FormattingService:
         pPr.append(pBdr)
 
 
-    def _add_paragraph_spacing(self, paragraph) -> None:
+    def _is_list_paragraph(self, paragraph) -> bool:
         """
-        Add a new line before and after a paragraph.
+        Detect whether a paragraph is a list item (ordered or unordered).
+
+        Two signals are used:
+        - Numbering properties (``w:numPr`` in the paragraph properties), which
+          Word applies to both bulleted and numbered lists.
+        - The paragraph style name (e.g. "List Paragraph", "List Bullet",
+          "List Number" and localised variants such as "Paragrafo elenco").
+
+        Args:
+            paragraph: python-docx paragraph object
+
+        Returns:
+            True if the paragraph is a list element, False otherwise
+        """
+        pPr = paragraph._p.pPr
+        if pPr is not None and pPr.find(qn('w:numPr')) is not None:
+            return True
+
+        style_name = (getattr(paragraph.style, 'name', '') or '').lower()
+        list_markers = (
+            'list paragraph', 'list bullet', 'list number', 'list continue',
+            'paragrafo elenco', 'elenco puntato', 'elenco numerato',
+        )
+        return any(marker in style_name for marker in list_markers)
+
+    def _apply_list_item_spacing(self, paragraph) -> None:
+        """
+        Add padding above and below a list item instead of blank lines.
+
+        Keeps list items visually spaced without breaking the list structure or
+        inserting stray line breaks between the bullet/number and its text.
+
+        Word's "contextual spacing" (``w:contextualSpacing``) is disabled on the
+        paragraph as well: list styles commonly enable it, which suppresses the
+        space before/after *between* consecutive items of the same style and
+        would otherwise make only the first element look spaced.
 
         Args:
             paragraph: python-docx paragraph object
         """
+        paragraph_format = paragraph.paragraph_format
+        paragraph_format.space_before = Pt(self.LIST_ITEM_SPACING_PT)
+        paragraph_format.space_after = Pt(self.LIST_ITEM_SPACING_PT)
+
+        pPr = paragraph._p.get_or_add_pPr()
+        contextual_spacing = pPr.find(qn('w:contextualSpacing'))
+        if contextual_spacing is None:
+            contextual_spacing = OxmlElement('w:contextualSpacing')
+            pPr.append(contextual_spacing)
+        contextual_spacing.set(qn('w:val'), '0')
+
+    def _add_paragraph_spacing(self, paragraph) -> None:
+        """
+        Add a new line before and after a paragraph.
+
+        List items (ordered/unordered) are handled differently: instead of
+        blank lines they receive padding above and below each element, so the
+        list structure stays intact.
+
+        Args:
+            paragraph: python-docx paragraph object
+        """
+        if self._is_list_paragraph(paragraph):
+            self._apply_list_item_spacing(paragraph)
+            return
+
         # Add a new line before the input paragraph
         p = paragraph._element
         # Add <w:br/> before the paragraph
@@ -699,6 +832,13 @@ class FormattingService:
         if not text.strip():
             return
 
+        # List items keep their structure: apply padding around the element
+        # instead of splitting the entry across lines.
+        if self._is_list_paragraph(paragraph):
+            logger.debug("Paragraph is a list item; applying padding instead of line breaks")
+            self._apply_list_item_spacing(paragraph)
+            return
+
         # Use spaCy Sentencizer for accurate sentence splitting
         keyword_service = get_keyword_service()
         sentences = keyword_service.split_sentences(text)
@@ -714,148 +854,77 @@ class FormattingService:
             r = run._element
             r.getparent().remove(r)
 
-        # Re-add sentences with line breaks between them
+        # Re-add sentences separated by a single line break. A single <w:br/>
+        # puts each sentence on its own line without the doubled blank-line gap
+        # that previously appeared between words/sentences.
         for i, sentence in enumerate(sentences):
             logger.debug(f"Adding sentence {i+1}/{len(sentences)}: '{sentence[:30]}...'")
-            paragraph.add_run(sentence)
+            run = paragraph.add_run(sentence)
 
-            # Add line break after each sentence except the last one
+            # Add a single line break after each sentence except the last one
             if i < len(sentences) - 1:
-                paragraph.add_run().add_break()
-                paragraph.add_run().add_break()
+                run.add_break()
 
         logger.debug(f"Finished adding sentence spacing to paragraph")
 
 
-    def _identify_sections(self, doc: Document) -> List[Tuple[int, int, str]]:
+    def _identify_sections(self, doc: Document, structure: Optional[DocumentStructure] = None) -> List[Tuple[int, int, str]]:
         """
-        Identifica sezioni nel documento. Una sezione è il testo che si trova tra due headings
-        (o dopo un heading fino alla fine del documento).
+        Identifica le sezioni del documento. Una sezione è il testo compreso tra
+        due heading (o da un heading fino alla fine del documento), heading esclusi.
 
-        Un heading è identificato da:
-        - Stile "Heading" (qualsiasi livello)
-        - Font size >= 14.0 pt
+        La classificazione degli heading è delegata al DocumentStructureService,
+        che usa il livello di outline dello stile (Titolo / Heading 1 / Heading 2
+        ...) con fallback a Markdown / euristica.
 
         Args:
             doc: python-docx Document object
+            structure: struttura pre-calcolata (opzionale)
 
         Returns:
-            Lista di tuple (start_index, end_index, section_text) dove:
-            - start_index: indice del primo paragrafo della sezione
-            - end_index: indice dell'ultimo paragrafo della sezione (prima del prossimo heading)
-            - section_text: testo completo della sezione
+            Lista di tuple (start_index, end_index, section_text)
         """
-        sections = []
-        current_section_start = None
-        current_section_paragraphs = []
+        structure = structure or self._build_structure(doc)
+        sections = [section.as_tuple() for section in structure.sections()]
 
-        logger.info('Identifying sections')
-        logger.debug(f"Total paragraphs in document: {len(doc.paragraphs)}")
-
-        try:
-            for i in range(len(doc.paragraphs)):
-                para = doc.paragraphs[i]
-                text = para.text.strip()
-
-                if not text:
-                    # Paragrafo vuoto: se siamo in una sezione, lo aggiungiamo
-                    if current_section_start is not None:
-                        current_section_paragraphs.append(para.text)
-                    continue
-
-                logger.debug(f"Analyzing paragraph {i}: '{text[:50]}...'")
-
-                # Determina se questo paragrafo è un heading
-                style_name = para.style.name
-                is_heading = self._is_heading(para, check_font_size=True, font_size_threshold=self.HEADING_FONT_SIZE_THRESHOLD)
-                font_size = self._get_paragraph_font_size(para)
-
-                logger.debug(f"  Style: {style_name}, is_heading: {is_heading}, font_size: {font_size}")
-
-                # Un heading delimita le sezioni
-                if is_heading:
-                    logger.debug(f"  Found heading/delimiter at paragraph {i}")
-
-                    # Se c'era una sezione in corso, la chiudiamo
-                    if current_section_start is not None and current_section_paragraphs:
-                        section_text = '\n'.join(current_section_paragraphs)
-                        sections.append((current_section_start, i - 1, section_text))
-                        logger.debug(f"  Closed section: start={current_section_start}, end={i-1}, text_length={len(section_text)}")
-
-                    # Reset per eventuale nuova sezione
-                    current_section_start = None
-                    current_section_paragraphs = []
-                else:
-                    # Questo è testo normale: fa parte di una sezione
-                    if current_section_start is None:
-                        # Inizia una nuova sezione
-                        current_section_start = i
-                        logger.debug(f"  Started new section at paragraph {i}")
-
-                    current_section_paragraphs.append(para.text)
-
-            # Chiudi l'ultima sezione se presente
-            if current_section_start is not None and current_section_paragraphs:
-                section_text = '\n'.join(current_section_paragraphs)
-                sections.append((current_section_start, len(doc.paragraphs) - 1, section_text))
-                logger.debug(f"Closed final section: start={current_section_start}, end={len(doc.paragraphs)-1}, text_length={len(section_text)}")
-
-            logger.info(f"Identified {len(sections)} sections")
-            for idx, (start, end, text) in enumerate(sections):
-                logger.debug(f"Section {idx}: paragraphs {start}-{end}, text preview: '{text[:100]}...'")
-
-        except Exception as e:
-            logger.error(f"Error identifying sections: {str(e)}", exc_info=True)
+        logger.info(f"Identified {len(sections)} sections")
+        for idx, (start, end, text) in enumerate(sections):
+            logger.debug(f"Section {idx}: paragraphs {start}-{end}, text preview: '{text[:100]}...'")
 
         return sections
 
-    def _identify_paragraphs(self, doc: Document) -> List[int]:
+    def _identify_paragraphs(self, doc: Document, structure: Optional[DocumentStructure] = None) -> List[int]:
         """
-        Identify paragraphs in document.
-        A paragraph is text that follows a heading (Heading 2, 3, etc.) and ends before the next heading.
+        Identify content paragraphs in the document.
+
+        A paragraph is any non-empty paragraph that is not a heading, a document
+        title or a caption. Content is captured regardless of the heading level
+        it sits under (including the introductory part before/under top-level
+        headings), not only under Heading 2+ sections.
 
         Args:
             doc: python-docx Document object
+            structure: pre-computed structure (optional)
 
         Returns:
-            List of paragraph indices that are part of content sections (not headings)
+            List of paragraph indices that are content paragraphs
         """
-        paragraphs = []
-        in_paragraph_section = False
-
-        for i, para in enumerate(doc.paragraphs):
-            # Check if this is a section heading (Heading 2, 3, 4, etc. but not Heading 1)
-            is_section_heading = self._is_section_heading(para)
-
-            if is_section_heading:
-                # We found a section heading, the next paragraphs will be part of this section
-                in_paragraph_section = True
-                logger.debug(f"Found section heading at index {i}: '{para.text[:30]}...'")
-                continue
-
-            # Check if this is a main title (Heading 1) - this ends the current paragraph section
-            if self._is_main_title(para):
-                in_paragraph_section = False
-                logger.debug(f"Found main title at index {i}, ending paragraph section")
-                continue
-
-            # If we're in a paragraph section and this is non-empty text, it's a paragraph
-            if in_paragraph_section and para.text.strip():
-                logger.debug(f"Identified paragraph {i}: '{para.text[:30]}...'")
-                paragraphs.append(i)
+        structure = structure or self._build_structure(doc)
+        paragraphs = structure.content_paragraph_indices()
 
         logger.info(f"Identified {len(paragraphs)} paragraphs (text following section headings)")
         if paragraphs:
             logger.debug(f"Example of identified paragraphs: {[doc.paragraphs[i].text[:30] for i in paragraphs[:3]]}")
         return paragraphs
 
-    def _identify_subparagraphs(self, doc: Document) -> List[Tuple[int, List[int]]]:
+    def _identify_subparagraphs(self, doc: Document, structure: Optional[DocumentStructure] = None) -> List[Tuple[int, List[int]]]:
         """
         Identify subparagraphs within paragraphs.
         Subparagraphs are complex periods dependent on each other.
 
         Args:
             doc: python-docx Document object
+            structure: pre-computed structure (optional, unused here)
 
         Returns:
             List of tuples (paragraph_index, [run_indices])
@@ -870,56 +939,44 @@ class FormattingService:
             # Split by complex sentence markers (;, :, etc.)
             parts = re.split(r'[;:]', text)
             if len(parts) > 1:
-                # This paragraph contains subparagraphs
-                run_groups = []
-                for part_idx in range(len(parts)):
-                    run_groups.append(part_idx)
+                run_groups = list(range(len(parts)))
                 subparagraphs.append((i, run_groups))
 
         logger.info(f"Identified {len(subparagraphs)} paragraphs with subparagraphs")
         return subparagraphs
 
-    def _identify_sentences(self, doc: Document) -> List[Tuple[int, List[str]]]:
+    def _identify_sentences(self, doc: Document, structure: Optional[DocumentStructure] = None) -> List[Tuple[int, List[str]]]:
         """
         Identify sentences in document using spaCy's Sentencizer.
 
-        This method uses spaCy's Sentencizer for accurate sentence boundary detection,
-        which handles:
-        - Abbreviations (e.g., "Dr.", "etc.", "es.")
-        - Complex punctuation (quotes, parentheses)
-        - Multiple languages
-        - Edge cases that regex patterns miss
+        Headings (identified via the structural model) are skipped, as they are
+        not sentence content.
 
         Args:
             doc: python-docx Document object
+            structure: pre-computed structure (optional)
 
         Returns:
             List of tuples (paragraph_index, [sentences])
-            where each tuple contains the paragraph index and a list of sentence strings
         """
         from app.services.keyword_service import get_keyword_service
 
+        structure = structure or self._build_structure(doc)
         sentence_map = []
         keyword_service = get_keyword_service()
 
         for i, para in enumerate(doc.paragraphs):
             # Skip headings as they're typically not sentence content
-            if self._is_heading(para, check_font_size=False):
-                logger.debug(f"Skipping sentence identification for paragraph {i} (Heading style)")
+            if structure.is_heading(i):
+                logger.debug(f"Skipping sentence identification for paragraph {i} (heading)")
                 continue
 
             text = para.text
             if not text.strip():
                 continue
 
-            logger.debug(f"Analyzing paragraph {i} for sentences: '{text[:50]}...'")
-
-            # Use spaCy Sentencizer for accurate sentence splitting
             sentences = keyword_service.split_sentences(text)
-
             if sentences:
-                logger.debug(f"Identified {len(sentences)} sentences in paragraph {i}")
-                logger.debug(f"  First sentence: '{sentences[0][:50]}...'")
                 sentence_map.append((i, sentences))
 
         total_sentences = sum(len(sents) for _, sents in sentence_map)
@@ -927,76 +984,88 @@ class FormattingService:
 
         return sentence_map
 
-    # Identify main title (Heading 1) - this is a special case for framing main title only
-    def _identify_main_title(self, doc: Document) -> List[int]:
+    # Identify main title (Title style / Heading 1) - special case for framing main title only
+    def _identify_main_title(self, doc: Document, structure: Optional[DocumentStructure] = None) -> List[int]:
         """
-        Identify main title in document.
-        Titles are paragraphs with specific styles (e.g. Heading 1) or formatting.
+        Identify main/document titles (Title style or Heading 1).
 
         Args:
             doc: python-docx Document object
+            structure: pre-computed structure (optional)
 
         Returns:
-            List of paragraph indices that are identified as titles
+            List of paragraph indices identified as main titles
         """
-        title_indices = []
-
-        for i, para in enumerate(doc.paragraphs):
-            style_name = para.style.name
-            logger.debug(f"Analyzing paragraph {i} for main title: style='{style_name}', text='{para.text[:30]}...'")
-            if self._is_main_title(para):
-                title_indices.append(i)
+        structure = structure or self._build_structure(doc)
+        title_indices = structure.main_title_indices()
 
         logger.info(f"Identified {len(title_indices)} titles")
         logger.debug(f"Identified title indices: {title_indices}")
         return title_indices
 
-    # Identify section titles (Heading 2, Heading 3) - this is a special case for framing section titles only
-    def _identify_section_titles(self, doc: Document) -> List[int]:
+    # Identify section titles (Heading 1) - special case for framing section titles only
+    def _identify_section_titles(self, doc: Document, structure: Optional[DocumentStructure] = None) -> List[int]:
         """
-        Identify titles in document.
-        Titles are paragraphs with specific styles (e.g. Heading 2, Heading 3) or formatting.
+        Identify section headings (Heading 1 / outline level 0 / Markdown '#').
 
         Args:
             doc: python-docx Document object
+            structure: pre-computed structure (optional)
 
         Returns:
-            List of paragraph indices that are identified as titles
+            List of paragraph indices identified as section titles
         """
-        title_indices = []
+        structure = structure or self._build_structure(doc)
+        title_indices = structure.section_heading_indices()
 
-        for i, para in enumerate(doc.paragraphs):
-            if self._is_section_heading(para):
-                title_indices.append(i)
-
-        logger.info(f"Identified {len(title_indices)} titles")
+        logger.info(f"Identified {len(title_indices)} section titles")
         return title_indices
 
-    # Identify captions - this is a special case for image captions
-    def _identify_image_captions(self, doc: Document) -> List[int]:
+    # Identify paragraph titles (Heading 2 and deeper)
+    def _identify_paragraph_titles(self, doc: Document, structure: Optional[DocumentStructure] = None) -> List[int]:
         """
-        Identify image captions in document.
-        Captions are paragraphs that follow an image and have specific styles or formatting.
+        Identify paragraph titles (Heading 2, 3, ... / outline level >= 1 /
+        Markdown '##'+).
+
+        These are the sub-section labels sitting below section titles, kept
+        distinct from both the document title and the section titles so they
+        can be formatted independently.
 
         Args:
             doc: python-docx Document object
+            structure: pre-computed structure (optional)
+
         Returns:
-            List of paragraph indices that are identified as image captions
+            List of paragraph indices identified as paragraph titles
         """
-        caption_indices = []
-        for i in range(1, len(doc.paragraphs)):
-            prev_para = doc.paragraphs[i - 1]
-            current_para = doc.paragraphs[i]
+        structure = structure or self._build_structure(doc)
+        title_indices = structure.paragraph_title_indices()
 
-            # Check if previous paragraph contains an image
-            has_image = any(run.element.xpath('.//w:drawing') for run in prev_para.runs)
+        logger.info(f"Identified {len(title_indices)} paragraph titles")
+        return title_indices
 
-            # Check if current paragraph is styled as a caption (e.g. "Caption" style)
-            is_caption_style = 'Caption' in current_para.style.name
+    # Identify captions (figure/table captions)
+    def _identify_image_captions(self, doc: Document, structure: Optional[DocumentStructure] = None) -> List[int]:
+        """
+        Identify captions in the document.
 
-            if has_image and is_caption_style:
-                caption_indices.append(i)
-        logger.info(f"Identified {len(caption_indices)} image captions")
+        A caption is detected from its paragraph style (localised names such as
+        "Caption" / "Didascalia" / "Légende" ...) or from its textual pattern
+        (e.g. "Figura 2: ...", "Figure 2. ...", "Tabella 1 - ...").
+
+        Detection is intentionally independent of the presence of an adjacent
+        image: captions styled or worded as such are recognised even when the
+        related image is anchored/floating or separated by empty paragraphs.
+
+        Args:
+            doc: python-docx Document object
+            structure: pre-computed structure (optional)
+        Returns:
+            List of paragraph indices that are identified as captions
+        """
+        structure = structure or self._build_structure(doc)
+        caption_indices = structure.caption_indices()
+        logger.info(f"Identified {len(caption_indices)} captions")
         logger.debug(f"Identified caption indices: {caption_indices}")
         return caption_indices
 
@@ -1023,10 +1092,13 @@ class FormattingService:
             doc = Document(input_path)
             spacing_applied = 0
 
+            # Build the structural model once for this operation
+            structure = self._build_structure(doc, source_path=input_path)
+
             # Apply spacing based on options
             if spacing_options.get('paragraphs', False):
                 logging.debug(f"Identifying PARAGRAPHS for spacing application")
-                paragraphs = self._identify_paragraphs(doc)
+                paragraphs = self._identify_paragraphs(doc, structure)
                 for idx in paragraphs:
                     logger.debug(f"Applying spacing to paragraph {idx}: '{doc.paragraphs[idx].text[:30]}...'")
                     self._add_paragraph_spacing(doc.paragraphs[idx])
@@ -1035,7 +1107,7 @@ class FormattingService:
 
             if spacing_options.get('sentences', False):
                 logger.debug(f"Identifying SENTENCES for spacing application")
-                sentences_to_process = self._identify_sentences(doc)
+                sentences_to_process = self._identify_sentences(doc, structure)
                 logger.debug(f"Sentences identified for spacing: {sentences_to_process[:3]} (showing first 3)")
                 # Process in reversed order to avoid index issues when modifying paragraphs
                 for para_idx, sentences in reversed(sentences_to_process):
@@ -1052,8 +1124,7 @@ class FormattingService:
                 'success': True,
                 'output_path': output_path,
                 'format': 'docx',
-                'spacing_applied': spacing_applied,
-                'spacing_options': spacing_options
+                'spacing_applied': spacing_applied
             }
 
         except Exception as e:
@@ -1110,6 +1181,9 @@ class FormattingService:
             doc = Document(input_path)
             borders_applied = 0
 
+            # Build the structural model once for this operation
+            structure = self._build_structure(doc, source_path=input_path)
+
             # Extract options with defaults
             use_tables = framing_options.get('use_tables', True)
             border_width = framing_options.get('border_width', None)
@@ -1125,93 +1199,23 @@ class FormattingService:
                            f"Color: {border_color or self.DEFAULT_BORDER_COLOR}, "
                            f"Style: {border_style or self.DEFAULT_BORDER_STYLE}")
 
-            # Collect paragraphs to frame based on options
-            paragraphs_to_frame = []
+            # Resolve border colour once. Style/width are resolved per part so
+            # sections, paragraphs and sentences are visually distinguishable,
+            # unless the request overrides them explicitly.
+            border_color = (border_color or self.DEFAULT_BORDER_COLOR).lstrip('#')
 
-            if framing_options.get('sections', False):
-                sections = self._identify_sections(doc)
-                logger.info(f"Identified {len(sections)} sections to frame")
+            def _borders_for(part_style: str, part_width: int) -> Tuple[str, int]:
+                return (border_style or part_style, border_width or part_width)
 
-                for start_idx, end_idx, section_text in sections:
-                    if use_tables:
-                        # Frame entire section as one table
-                        # For now, frame each paragraph in the section individually
-                        # TODO: Future enhancement - merge section paragraphs into single table
-                        for idx in range(start_idx, end_idx + 1):
-                            para = doc.paragraphs[idx]
-                            if self._should_frame_paragraph(para, filter_options):
-                                paragraphs_to_frame.append(idx)
-                    else:
-                        # Use traditional paragraph borders
-                        for idx in range(start_idx, end_idx + 1):
-                            para = doc.paragraphs[idx]
-                            if self._should_frame_paragraph(para, filter_options):
-                                self._add_paragraph_border(para)
-                                borders_applied += 1
-
-            if framing_options.get('paragraphs', False):
-                paragraphs = self._identify_paragraphs(doc)
-                logger.info(f"Identified {len(paragraphs)} paragraphs to frame")
-
-                for idx in paragraphs:
-                    para = doc.paragraphs[idx]
-                    if self._should_frame_paragraph(para, filter_options):
-                        if use_tables:
-                            paragraphs_to_frame.append(idx)
-                        else:
-                            self._add_paragraph_border(para)
-                            borders_applied += 1
-
-            if framing_options.get('subparagraphs', False):
-                subparagraphs = self._identify_subparagraphs(doc)
-                logger.info(f"Identified {len(subparagraphs)} subparagraphs to frame")
-
-                for para_idx, _ in subparagraphs:
-                    para = doc.paragraphs[para_idx]
-                    if self._should_frame_paragraph(para, filter_options):
-                        if use_tables:
-                            paragraphs_to_frame.append(para_idx)
-                        else:
-                            self._add_paragraph_border(para)
-                            borders_applied += 1
-
-            if framing_options.get('sentences', False):
-                sentence_map = self._identify_sentences(doc)
-                logger.info(f"Identified sentences in {len(sentence_map)} paragraphs to frame")
-
-                for para_idx, sentences in sentence_map:
-                    if len(sentences) > 0:
-                        para = doc.paragraphs[para_idx]
-                        if self._should_frame_paragraph(para, filter_options):
-                            if use_tables:
-                                paragraphs_to_frame.append(para_idx)
-                            else:
-                                self._add_paragraph_border(para)
-                                borders_applied += 1
-
-            # Apply table encapsulation if using tables
-            if use_tables and paragraphs_to_frame:
-                # Remove duplicates and sort in reverse order to avoid index shifting
-                paragraphs_to_frame = sorted(set(paragraphs_to_frame), reverse=True)
-
-                logger.info(f"Encapsulating {len(paragraphs_to_frame)} paragraphs in tables")
-
-                for idx in paragraphs_to_frame:
-                    try:
-                        para = doc.paragraphs[idx]
-                        self._encapsulate_paragraph_in_table(
-                            paragraph=para,
-                            doc=doc,
-                            border_width=border_width,
-                            border_color=border_color,
-                            border_style=border_style,
-                            cell_margin=cell_margin,
-                            preserve_spacing=preserve_spacing
-                        )
-                        borders_applied += 1
-                    except Exception as e:
-                        logger.error(f"Failed to encapsulate paragraph {idx}: {str(e)}")
-                        # Continue with other paragraphs
+            if not use_tables:
+                borders_applied += self._apply_framing_paragraph_borders(
+                    doc, structure, framing_options, filter_options
+                )
+            else:
+                borders_applied += self._apply_framing_tables(
+                    doc, structure, framing_options, filter_options,
+                    border_color, cell_margin, preserve_spacing, _borders_for
+                )
 
             # Save document
             doc.save(output_path)
@@ -1222,14 +1226,169 @@ class FormattingService:
                 'success': True,
                 'output_path': output_path,
                 'format': 'docx',
-                'borders_applied': borders_applied,
-                'framing_options': framing_options,
-                'method': 'table_encapsulation' if use_tables else 'paragraph_borders'
+                'borders_applied': borders_applied
             }
 
         except Exception as e:
             logger.error(f"DOCX framing error: {str(e)}")
             raise FormattingException(f"DOCX framing failed: {str(e)}")
+
+    def _apply_framing_paragraph_borders(
+        self,
+        doc: Document,
+        structure: DocumentStructure,
+        framing_options: Dict[str, Any],
+        filter_options: Optional[Dict[str, Any]],
+    ) -> int:
+        """Legacy fallback: draw borders directly on paragraphs (no tables)."""
+        borders_applied = 0
+        indices = set()
+
+        if framing_options.get('sections', False):
+            for start_idx, end_idx, _ in self._identify_sections(doc, structure):
+                indices.update(range(start_idx, end_idx + 1))
+        if framing_options.get('paragraphs', False):
+            indices.update(self._identify_paragraphs(doc, structure))
+        if framing_options.get('subparagraphs', False):
+            indices.update(idx for idx, _ in self._identify_subparagraphs(doc, structure))
+        if framing_options.get('sentences', False):
+            indices.update(idx for idx, _ in self._identify_sentences(doc, structure))
+
+        for idx in sorted(indices):
+            para = doc.paragraphs[idx]
+            if self._should_frame_paragraph(para, filter_options):
+                self._add_paragraph_border(para)
+                borders_applied += 1
+        return borders_applied
+
+    def _apply_framing_tables(
+        self,
+        doc: Document,
+        structure: DocumentStructure,
+        framing_options: Dict[str, Any],
+        filter_options: Optional[Dict[str, Any]],
+        border_color: str,
+        cell_margin: Optional[int],
+        preserve_spacing: bool,
+        borders_for,
+    ) -> int:
+        """
+        Encapsulate document parts in single-cell tables at the right granularity.
+
+        Each part is framed with its own table unit:
+        - ``sections``  -> one table wrapping all paragraphs of the section,
+        - ``paragraphs``/``subparagraphs`` -> one table per paragraph,
+        - ``sentences`` -> one table per sentence.
+
+        Every table is followed by an empty paragraph so adjacent tables are not
+        merged by Word and the blocks stay visually separated.
+
+        Precedence when several options are enabled: sections > paragraphs >
+        subparagraphs > sentences. A paragraph already consumed by a
+        higher-priority part is not framed again.
+        """
+        # Collect operations as (kind, payload) using live paragraph objects so
+        # that tree mutations during execution do not invalidate integer indices.
+        operations: List[Tuple[str, Any]] = []
+        consumed = set()  # ids of paragraph elements already assigned to a part
+
+        def _take(para) -> bool:
+            key = id(para._element)
+            if key in consumed:
+                return False
+            if not self._should_frame_paragraph(para, filter_options):
+                return False
+            consumed.add(key)
+            return True
+
+        if framing_options.get('sections', False):
+            sections = self._identify_sections(doc, structure)
+            logger.info(f"Identified {len(sections)} sections to frame")
+            for start_idx, end_idx, _ in sections:
+                paras = []
+                for idx in range(start_idx, end_idx + 1):
+                    para = doc.paragraphs[idx]
+                    if _take(para):
+                        paras.append(para)
+                if paras:
+                    operations.append(('section', paras))
+
+        if framing_options.get('paragraphs', False):
+            paragraphs = self._identify_paragraphs(doc, structure)
+            logger.info(f"Identified {len(paragraphs)} paragraphs to frame")
+            for idx in paragraphs:
+                para = doc.paragraphs[idx]
+                if _take(para):
+                    operations.append(('paragraph', [para]))
+
+        if framing_options.get('subparagraphs', False):
+            subparagraphs = self._identify_subparagraphs(doc, structure)
+            logger.info(f"Identified {len(subparagraphs)} subparagraphs to frame")
+            for para_idx, _ in subparagraphs:
+                para = doc.paragraphs[para_idx]
+                if _take(para):
+                    operations.append(('paragraph', [para]))
+
+        if framing_options.get('sentences', False):
+            sentence_map = self._identify_sentences(doc, structure)
+            logger.info(f"Identified sentences in {len(sentence_map)} paragraphs to frame")
+            for para_idx, sentences in sentence_map:
+                if not sentences:
+                    continue
+                para = doc.paragraphs[para_idx]
+                if _take(para):
+                    operations.append(('sentences', (para, sentences)))
+
+        # Execute bottom-to-top so inserting/removing elements never shifts the
+        # positions of parts we have not processed yet.
+        body = list(doc.element.body)
+
+        def _first_para_element(op):
+            _kind, payload = op
+            para = payload[0] if _kind != 'sentences' else payload[0]
+            return para._element
+
+        def _pos(op):
+            el = _first_para_element(op)
+            try:
+                return body.index(el)
+            except ValueError:
+                return -1
+
+        operations.sort(key=_pos, reverse=True)
+
+        borders_applied = 0
+        for kind, payload in operations:
+            try:
+                if kind == 'section':
+                    style, width = borders_for(self.SECTION_BORDER_STYLE, self.SECTION_BORDER_WIDTH)
+                    self._encapsulate_paragraphs_in_table(
+                        payload, doc, border_width=width, border_color=border_color,
+                        border_style=style, cell_margin=cell_margin,
+                        preserve_spacing=preserve_spacing,
+                    )
+                elif kind == 'paragraph':
+                    style, width = borders_for(self.PARAGRAPH_BORDER_STYLE, self.PARAGRAPH_BORDER_WIDTH)
+                    self._encapsulate_paragraphs_in_table(
+                        payload, doc, border_width=width, border_color=border_color,
+                        border_style=style, cell_margin=cell_margin,
+                        preserve_spacing=preserve_spacing,
+                    )
+                elif kind == 'sentences':
+                    para, sentences = payload
+                    style, width = borders_for(self.SENTENCE_BORDER_STYLE, self.SENTENCE_BORDER_WIDTH)
+                    self._encapsulate_sentences_in_tables(
+                        para, sentences, doc, border_width=width, border_color=border_color,
+                        border_style=style, cell_margin=cell_margin,
+                        preserve_spacing=preserve_spacing,
+                    )
+                borders_applied += 1
+            except Exception as e:
+                logger.error(f"Failed to frame {kind}: {str(e)}")
+                # Continue with the remaining parts
+
+        logger.info(f"Encapsulated {len(operations)} parts in tables")
+        return borders_applied
 
     def _apply_framing_pdf(
         self,
@@ -1390,6 +1549,9 @@ class FormattingService:
             # Load document
             doc = Document(input_path)
 
+            # Build the structural model once for this operation
+            structure = self._build_structure(doc, source_path=input_path)
+
             # Get options
             max_keywords = keyword_options.get('max_keywords', 5)
             include_proper_nouns = keyword_options.get('include_proper_nouns', True)
@@ -1401,7 +1563,7 @@ class FormattingService:
             spacy_fallback_used = False
 
             # Identify sections using the advanced method
-            sections = self._identify_sections(doc)
+            sections = self._identify_sections(doc, structure)
             logger.info(f"Identified {len(sections)} sections for keyword extraction")
 
             if not sections:
@@ -1484,9 +1646,13 @@ class FormattingService:
                     logger.debug(f"spaCy extracted keywords: {keywords}")
 
                 if keywords:
+                    # Detect the section language so the prefix is localised
+                    # (e.g. "Parole chiave" for Italian, "Keywords" for English).
+                    section_language = keyword_service.detect_language(section_text)
+
                     # Format keywords using keyword_service
-                    # This returns: "Parole chiave: keyword1, keyword2, keyword3"
-                    keyword_text = keyword_service.format_keywords(keywords)
+                    # This returns: "<localised label>: keyword1, keyword2, ..."
+                    keyword_text = keyword_service.format_keywords(keywords, language=section_language)
                     logger.debug(f"Formatted keywords for section '{first_para[:30]}...': {keyword_text}")
 
                     # Insert keyword paragraph right after the section start
@@ -1494,6 +1660,14 @@ class FormattingService:
 
                     # Create new paragraph element
                     new_para_element = OxmlElement('w:p')
+
+                    # Add paragraph properties with spacing after, so the
+                    # keywords are visually separated from the section content.
+                    pPr = OxmlElement('w:pPr')
+                    spacing = OxmlElement('w:spacing')
+                    spacing.set(qn('w:after'), str(self.KEYWORD_SPACING_AFTER_TWIPS))
+                    pPr.append(spacing)
+                    new_para_element.append(pPr)
 
                     # Create run element with formatting properties
                     run_element = OxmlElement('w:r')
@@ -1598,11 +1772,14 @@ class FormattingService:
             # Load document
             doc = Document(input_path)
 
+            # Build the structural model once for this operation
+            structure = self._build_structure(doc, source_path=input_path)
+
             # Get keyword service for POS analysis
             keyword_service = get_keyword_service()
 
             # Identify sections (this excludes headings)
-            sections = self._identify_sections(doc)
+            sections = self._identify_sections(doc, structure)
 
             if not sections:
                 logger.warning("No sections found in document. Nothing to format.")
@@ -1678,7 +1855,7 @@ class FormattingService:
 
                 # IMPORTANT: Also skip if this paragraph IS a heading (title)
                 # Even if it's in section_paragraph_indices, headings should not be processed
-                if self._is_heading(paragraph):
+                if structure.is_heading(para_idx):
                     logger.debug(f"Skipping paragraph {para_idx} (is a heading)")
                     continue
 
@@ -1943,6 +2120,137 @@ class FormattingService:
             }
         }
 
+    def _copy_run_formatting(self, source_run, new_run) -> None:
+        """Copy character formatting (and hyperlinks) from one run to another."""
+        if source_run.bold is not None:
+            new_run.bold = source_run.bold
+        if source_run.italic is not None:
+            new_run.italic = source_run.italic
+        if source_run.underline is not None:
+            new_run.underline = source_run.underline
+        if source_run.font.name:
+            new_run.font.name = source_run.font.name
+        if source_run.font.size:
+            new_run.font.size = source_run.font.size
+        if source_run.font.color and source_run.font.color.rgb:
+            new_run.font.color.rgb = source_run.font.color.rgb
+
+        # Copy hyperlinks and other complex child elements at the XML level.
+        if source_run._element is not None:
+            for child in source_run._element:
+                if 'hyperlink' in str(child.tag).lower():
+                    new_run._element.append(child)
+
+    def _copy_paragraph_into(self, dest_paragraph, source_paragraph, preserve_spacing: bool = True) -> None:
+        """Copy style, alignment, spacing and all runs from source into dest."""
+        try:
+            dest_paragraph.style = source_paragraph.style
+        except Exception:
+            logger.debug(f"Could not copy paragraph style: {source_paragraph.style}")
+
+        if source_paragraph.alignment:
+            dest_paragraph.alignment = source_paragraph.alignment
+
+        if preserve_spacing:
+            src_fmt = source_paragraph.paragraph_format
+            if src_fmt.space_before is not None:
+                dest_paragraph.paragraph_format.space_before = src_fmt.space_before
+            if src_fmt.space_after is not None:
+                dest_paragraph.paragraph_format.space_after = src_fmt.space_after
+
+        for run in source_paragraph.runs:
+            new_run = dest_paragraph.add_run(run.text)
+            self._copy_run_formatting(run, new_run)
+
+    def _insert_table_at(self, doc, anchor_element, before: bool = True):
+        """Create a 1x1 table and insert it relative to ``anchor_element``.
+
+        Returns the ``(table, cell)`` pair. The table is inserted immediately
+        before (default) or after the anchor element in the document tree.
+        """
+        table = doc.add_table(rows=1, cols=1)
+        table_element = table._element
+        if before:
+            anchor_element.addprevious(table_element)
+        else:
+            anchor_element.addnext(table_element)
+        return table, table.rows[0].cells[0]
+
+    @staticmethod
+    def _add_empty_paragraph_after(element) -> None:
+        """Insert an empty paragraph right after ``element`` for separation.
+
+        The trailing blank line keeps consecutive tables from being merged by
+        Word into a single grid and gives the framed blocks visual breathing
+        room.
+        """
+        element.addnext(OxmlElement('w:p'))
+
+    def _encapsulate_paragraphs_in_table(
+        self,
+        paragraphs: List,
+        doc,
+        border_width: Optional[int] = None,
+        border_color: Optional[str] = None,
+        border_style: Optional[str] = None,
+        cell_margin: Optional[int] = None,
+        preserve_spacing: bool = True
+    ) -> None:
+        """
+        Encapsulate one or more consecutive paragraphs in a single 1x1 table.
+
+        All provided paragraphs are moved into the same table cell (each keeps
+        its own line/paragraph inside the cell), the table is inserted at the
+        position of the first paragraph, the originals are removed and an empty
+        paragraph is appended after the table for visual separation.
+
+        Args:
+            paragraphs: List of python-docx paragraphs to wrap in one cell.
+            doc: python-docx document object.
+            border_width: Border width in eighths of a point.
+            border_color: Border color in hex format without #.
+            border_style: Border style ('single', 'double', 'dashed', ...).
+            cell_margin: Cell margin in twips.
+            preserve_spacing: Whether to preserve paragraph spacing.
+        """
+        if not paragraphs:
+            return
+
+        border_width = border_width if border_width is not None else self.DEFAULT_TABLE_BORDER_WIDTH
+        border_color = border_color if border_color is not None else self.DEFAULT_BORDER_COLOR
+        border_style = border_style if border_style is not None else self.DEFAULT_BORDER_STYLE
+        cell_margin = cell_margin if cell_margin is not None else self.DEFAULT_TABLE_CELL_MARGIN
+
+        first_element = paragraphs[0]._element
+
+        # Insert the table just before the first paragraph.
+        table, cell = self._insert_table_at(doc, first_element, before=True)
+        table_element = table._element
+
+        # Copy each source paragraph into the single cell.
+        for i, src in enumerate(paragraphs):
+            dest = cell.paragraphs[0] if i == 0 else cell.add_paragraph()
+            self._copy_paragraph_into(dest, src, preserve_spacing)
+
+        # Apply borders and margins.
+        self._set_table_borders(table, border_width, border_color, border_style)
+        self._set_table_cell_margins(table, cell_margin)
+
+        # Remove the original paragraphs from the body.
+        for src in paragraphs:
+            el = src._element
+            parent = el.getparent()
+            if parent is not None:
+                parent.remove(el)
+
+        # Trailing empty paragraph so tables don't merge and blocks stay separated.
+        self._add_empty_paragraph_after(table_element)
+
+        logger.debug(
+            f"Encapsulated {len(paragraphs)} paragraph(s) in a table: "
+            f"'{cell.paragraphs[0].text[:50]}...'"
+        )
+
     def _encapsulate_paragraph_in_table(
         self,
         paragraph,
@@ -1953,128 +2261,81 @@ class FormattingService:
         cell_margin: Optional[int] = None,
         preserve_spacing: bool = True
     ) -> None:
+        """Encapsulate a single paragraph in a 1x1 table (see the list variant)."""
+        self._encapsulate_paragraphs_in_table(
+            [paragraph], doc,
+            border_width=border_width,
+            border_color=border_color,
+            border_style=border_style,
+            cell_margin=cell_margin,
+            preserve_spacing=preserve_spacing,
+        )
+
+    def _encapsulate_sentences_in_tables(
+        self,
+        paragraph,
+        sentences: List[str],
+        doc,
+        border_width: Optional[int] = None,
+        border_color: Optional[str] = None,
+        border_style: Optional[str] = None,
+        cell_margin: Optional[int] = None,
+        preserve_spacing: bool = True
+    ) -> int:
         """
-        Encapsulate a paragraph in a 1x1 table with customizable borders.
+        Replace a paragraph with one 1x1 table per sentence.
 
-        This method:
-        - Creates a 1x1 table
-        - Moves the paragraph content into the table cell
-        - Preserves all runs (bold, italic, links, images, etc.)
-        - Maintains paragraph style and spacing
-        - Sets customizable borders
+        Each sentence is placed in its own single-cell table, followed by an
+        empty paragraph so the sentence boxes stay visually separated and are
+        not merged by Word. Sentence text is re-emitted as plain runs inheriting
+        the paragraph style/alignment; per-run character formatting inside a
+        sentence is not preserved (the paragraph is split by text).
 
-        Args:
-            paragraph: python-docx paragraph object to encapsulate
-            doc: python-docx document object
-            border_width: Border width in eighths of a point (default: DEFAULT_TABLE_BORDER_WIDTH)
-            border_color: Border color in hex format without # (default: DEFAULT_BORDER_COLOR)
-            border_style: Border style - 'single', 'double', 'dashed', etc. (default: DEFAULT_BORDER_STYLE)
-            cell_margin: Cell margin in twips (default: DEFAULT_TABLE_CELL_MARGIN)
-            preserve_spacing: Whether to preserve paragraph spacing (default: True)
+        Returns:
+            The number of sentence tables created.
         """
-        # Use defaults if not specified
-        if border_width is None:
-            border_width = self.DEFAULT_TABLE_BORDER_WIDTH
-        if border_color is None:
-            border_color = self.DEFAULT_BORDER_COLOR
-        if border_style is None:
-            border_style = self.DEFAULT_BORDER_STYLE
-        if cell_margin is None:
-            cell_margin = self.DEFAULT_TABLE_CELL_MARGIN
+        if not sentences:
+            return 0
 
-        # Store original paragraph properties
+        border_width = border_width if border_width is not None else self.DEFAULT_TABLE_BORDER_WIDTH
+        border_color = border_color if border_color is not None else self.DEFAULT_BORDER_COLOR
+        border_style = border_style if border_style is not None else self.DEFAULT_BORDER_STYLE
+        cell_margin = cell_margin if cell_margin is not None else self.DEFAULT_TABLE_CELL_MARGIN
+
         original_style = paragraph.style
         original_alignment = paragraph.alignment
-
-        # Store spacing if needed
-        spacing_before = None
-        spacing_after = None
-        if preserve_spacing:
-            para_format = paragraph.paragraph_format
-            spacing_before = para_format.space_before
-            spacing_after = para_format.space_after
-
-        # Get paragraph position in document
         para_element = paragraph._element
-        para_parent = para_element.getparent()
-        para_index = list(para_parent).index(para_element)
 
-        # Create a 1x1 table
-        table = doc.add_table(rows=1, cols=1)
-        cell = table.rows[0].cells[0]
+        created = 0
+        for sentence in sentences:
+            text = sentence.strip()
+            if not text:
+                continue
 
-        # Move table element to paragraph position
-        table_element = table._element
-        para_parent.insert(para_index, table_element)
+            # Insert the sentence table before the (soon removed) paragraph so
+            # the resulting order matches the original reading order.
+            table, cell = self._insert_table_at(doc, para_element, before=True)
+            dest = cell.paragraphs[0]
+            try:
+                dest.style = original_style
+            except Exception:
+                logger.debug(f"Could not copy paragraph style: {original_style}")
+            if original_alignment:
+                dest.alignment = original_alignment
+            dest.add_run(text)
 
-        # Copy all runs from original paragraph to cell
-        cell_paragraph = cell.paragraphs[0]
+            self._set_table_borders(table, border_width, border_color, border_style)
+            self._set_table_cell_margins(table, cell_margin)
+            self._add_empty_paragraph_after(table._element)
+            created += 1
 
-        # Copy paragraph style and alignment
-        try:
-            cell_paragraph.style = original_style
-        except:
-            logger.debug(f"Could not copy paragraph style: {original_style}")
+        # Remove the original paragraph now that its sentences are framed.
+        parent = para_element.getparent()
+        if parent is not None:
+            parent.remove(para_element)
 
-        if original_alignment:
-            cell_paragraph.alignment = original_alignment
-
-        # Copy all runs with their formatting
-        for run in paragraph.runs:
-            new_run = cell_paragraph.add_run(run.text)
-
-            # Copy run formatting
-            if run.bold is not None:
-                new_run.bold = run.bold
-            if run.italic is not None:
-                new_run.italic = run.italic
-            if run.underline is not None:
-                new_run.underline = run.underline
-            if run.font.name:
-                new_run.font.name = run.font.name
-            if run.font.size:
-                new_run.font.size = run.font.size
-            if run.font.color.rgb:
-                new_run.font.color.rgb = run.font.color.rgb
-
-            # Copy hyperlinks and other complex elements at XML level
-            if run._element is not None:
-                for child in run._element:
-                    # Copy hyperlink elements
-                    if 'hyperlink' in str(child.tag).lower():
-                        # Clone the hyperlink element
-                        new_run._element.append(child)
-
-        # Set table properties
-        self._set_table_borders(table, border_width, border_color, border_style)
-        self._set_table_cell_margins(table, cell_margin)
-
-        # Set table spacing if preserving original spacing
-        if preserve_spacing and (spacing_before or spacing_after):
-            tblPr = table._element.find(qn('w:tblPr'))
-            if tblPr is None:
-                tblPr = OxmlElement('w:tblPr')
-                table._element.insert(0, tblPr)
-
-            # Add spacing before
-            if spacing_before:
-                tblPrEx = OxmlElement('w:tblpPr')
-                tblPrEx.set(qn('w:topFromText'), str(int(spacing_before.pt * 20)))
-                tblPr.append(tblPrEx)
-
-            # Add spacing after
-            if spacing_after:
-                # Use paragraph spacing in the cell
-                cell_paragraph.paragraph_format.space_after = spacing_after
-
-        # Remove original paragraph
-        para_parent.remove(para_element)
-
-        # Add an empty paragraph after the table for visual separation
-        empty_para = OxmlElement('w:p')
-        para_parent.insert(para_index + 1, empty_para)
-
-        logger.debug(f"Encapsulated paragraph in table: '{cell_paragraph.text[:50]}...'")
+        logger.debug(f"Encapsulated {created} sentence(s) in individual tables")
+        return created
 
     def _set_table_borders(
         self,

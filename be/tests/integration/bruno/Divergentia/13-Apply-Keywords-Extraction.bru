@@ -1,0 +1,98 @@
+meta {
+  name: Apply Keywords Extraction with Ollama
+  type: http
+  seq: 13
+}
+
+post {
+  url: {{base_url}}/documents/{{document_id}}/keywords
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "keywords": {
+      "max_keywords": 7,
+      "include_proper_nouns": true,
+      "model": "llama2"
+    }
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.success: eq true
+  res.body.output_path: isDefined
+  res.body.format: eq docx
+  res.body.sections_processed: isDefined
+  res.body.total_keywords: isDefined
+  res.body.extraction_method: isDefined
+}
+
+script:pre-request {
+  // Ensure we have a document_id from previous upload
+  const docId = bru.getVar("document_id");
+  if (!docId) {
+    throw new Error("document_id not found. Please upload a document first (03-Upload-Document)");
+  }
+}
+
+docs {
+  # Apply Keywords Extraction with Ollama
+
+  Estrae le parole chiave dalle sezioni del documento utilizzando Ollama (con fallback a spaCy).
+
+  ## Prerequisites
+  - Un documento deve essere caricato prima (esegui 03-Upload-Document)
+  - Ollama deve essere in esecuzione su http://localhost:11434
+  - Il modello specificato deve essere disponibile (es. ollama pull llama2)
+
+  ## Request
+  ```json
+  {
+    "keywords": {
+      "max_keywords": 7,        // Numero di parole chiave per sezione (1-10)
+      "include_proper_nouns": true,  // Include nomi propri (per fallback spaCy)
+      "model": "llama2"         // Modello Ollama opzionale (default: configurazione server)
+    }
+  }
+  ```
+
+  ## Response
+  ```json
+  {
+    "success": true,
+    "output_path": "/path/to/keywords_20260226120000_document.docx",
+    "format": "docx",
+    "sections_processed": 5,
+    "total_keywords": 35,
+    "keyword_options": {
+      "max_keywords": 7,
+      "include_proper_nouns": true,
+      "model": "llama2"
+    },
+    "extraction_method": "Ollama",
+    "ollama_used": true,
+    "spacy_fallback_used": false
+  }
+  ```
+
+  ## Notes
+  - Le parole chiave vengono inserite come paragrafo dopo ogni titolo di sezione
+  - Formato: "Parole chiave: keyword1, keyword2, keyword3"
+  - Stile: Italico, font 10pt
+  - Se Ollama non è disponibile, usa automaticamente spaCy come fallback
+  - Il documento originale non viene modificato, viene creato un nuovo file
+
+  ## Extraction Methods
+  - "Ollama": Tutte le sezioni estratte con Ollama
+  - "spaCy": Tutte le sezioni estratte con spaCy
+  - "Ollama with spaCy fallback": Alcune sezioni con Ollama, altre con spaCy
+
+  ## Troubleshooting
+  - Se `extraction_method: "spaCy"`, verifica che Ollama sia in esecuzione
+  - Se `sections_processed: 0`, il documento potrebbe non avere sezioni riconoscibili
+  - Assicurati che il documento abbia stili Heading o formattazione riconoscibile
+}
+
