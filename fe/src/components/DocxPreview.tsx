@@ -40,9 +40,11 @@ export function DocxPreview({ documentId, refreshKey }: DocxPreviewProps) {
         doc.open();
         doc.write(
           '<!doctype html><html><head><meta charset="utf-8">' +
-            '<style>body{margin:0;background:#f4f8fa;}' +
-            '.docx-wrapper{background:transparent;padding:16px;}' +
-            '.docx-wrapper>section.docx{box-shadow:0 1px 6px rgba(0,0,0,.15);margin:0 auto 16px;}' +
+            '<style>html,body{margin:0;background:#faf3ea;max-width:100%;overflow-x:hidden;}' +
+            '.docx-wrapper{background:transparent;padding:16px;max-width:100%;box-sizing:border-box;}' +
+            '.docx-wrapper>section.docx{box-shadow:0 1px 6px rgba(0,0,0,.15);margin:0 auto 16px;max-width:100%;box-sizing:border-box;}' +
+            '.docx-wrapper img{max-width:100%;height:auto;}' +
+            '.docx-wrapper table{max-width:100%;}' +
             '</style></head><body></body></html>',
         );
         doc.close();
@@ -50,7 +52,11 @@ export function DocxPreview({ documentId, refreshKey }: DocxPreviewProps) {
         await renderAsync(blob, doc.body, undefined, {
           className: 'docx',
           inWrapper: true,
-          ignoreWidth: false,
+          // Reflow the page to the available preview width instead of the
+          // document's fixed physical page size (A4/Letter, ~800px). This is
+          // what lets the preview column stay narrower than a full page
+          // without ever needing a horizontal scrollbar.
+          ignoreWidth: true,
           ignoreHeight: false,
           breakPages: true,
           experimental: true,

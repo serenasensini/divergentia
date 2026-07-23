@@ -192,10 +192,11 @@ export function createApiClient(options: ApiClientOptions = {}) {
     async summarizeDocument(
       documentId: string,
       summaryType: SummaryType,
+      addToDocument = false,
     ): Promise<SummarizeResponse> {
       return postJson(
         url(`/api/documents/${documentId}/summarize`),
-        { summary_type: summaryType },
+        { summary_type: summaryType, add_to_document: addToDocument },
         doFetch,
       );
     },
@@ -203,10 +204,11 @@ export function createApiClient(options: ApiClientOptions = {}) {
     async paraphraseDocument(
       documentId: string,
       style: ParaphraseStyle,
+      applyToDocument = false,
     ): Promise<ParaphraseResponse> {
       return postJson(
         url(`/api/documents/${documentId}/paraphrase`),
-        { style },
+        { style, apply_to_document: applyToDocument },
         doFetch,
       );
     },

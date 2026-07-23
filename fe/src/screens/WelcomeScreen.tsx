@@ -7,6 +7,7 @@ import {
 } from '../state/preferences';
 import { useI18n } from '../state/i18n';
 import { LanguageSelector } from '../components/LanguageSelector';
+import { Plumbob } from '../components/Plumbob';
 
 interface WelcomeScreenProps {
   onEnter: () => void;
@@ -29,6 +30,9 @@ export function WelcomeScreen({ onEnter }: WelcomeScreenProps) {
     <main className="welcome" aria-labelledby="welcome-title">
       <div className="welcome__card">
         <h1 id="welcome-title" className="welcome__title">
+          {preferences.gameTheme && (
+            <Plumbob state="completed" size={26} className="welcome__title-plumbob" />
+          )}
           {t('welcome.title')}
         </h1>
         <p className="welcome__intro">{t('welcome.intro')}</p>
@@ -142,6 +146,32 @@ export function WelcomeScreen({ onEnter }: WelcomeScreenProps) {
             />
             <label htmlFor="classic-mode">{t('welcome.classicMode')}</label>
           </div>
+
+          <div className="field field--switch">
+            <input
+              id="game-theme"
+              type="checkbox"
+              checked={preferences.gameTheme}
+              onChange={(e) => setPreference('gameTheme', e.target.checked)}
+            />
+            <label htmlFor="game-theme">{t('welcome.gameTheme')}</label>
+          </div>
+
+          {preferences.gameTheme && (
+            <div className="field field--switch">
+              <input
+                id="sound-effects"
+                type="checkbox"
+                checked={preferences.soundEffects}
+                onChange={(e) =>
+                  setPreference('soundEffects', e.target.checked)
+                }
+              />
+              <label htmlFor="sound-effects">
+                {t('welcome.soundEffects')}
+              </label>
+            </div>
+          )}
         </section>
 
         <button

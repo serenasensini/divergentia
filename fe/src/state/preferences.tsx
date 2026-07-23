@@ -26,6 +26,18 @@ export interface Preferences {
   reduceMotion: boolean;
   /** Classic mode swaps the isometric scene for a plain list UI. */
   classicMode: boolean;
+  /**
+   * Sims-inspired game skin: diamond "plumbob" step tracker and saturated
+   * accent palette layered on top of the calm theme. Purely cosmetic — it
+   * never overrides theme/font/text-size/reduce-motion choices.
+   */
+  gameTheme: boolean;
+  /**
+   * Optional success "chime" on completing a station, only ever played when
+   * `gameTheme` is also on. Off by default — an explicit opt-in, separate
+   * from `reduceMotion` (which only governs visual animation).
+   */
+  soundEffects: boolean;
   /** UI language for internationalisation. */
   language: Language;
   /** Whether the Welcome room has been completed at least once. */
@@ -51,6 +63,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
     typeof window.matchMedia === 'function' &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   classicMode: false,
+  gameTheme: false,
+  soundEffects: false,
   language: detectLanguage(),
   onboarded: false,
 };
@@ -97,6 +111,7 @@ function applyToDocument(prefs: Preferences) {
   root.dataset.font = prefs.font;
   root.dataset.textSize = prefs.textSize;
   root.dataset.reduceMotion = String(prefs.reduceMotion);
+  root.dataset.gameTheme = String(prefs.gameTheme);
   root.lang = prefs.language;
 }
 

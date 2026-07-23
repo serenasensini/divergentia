@@ -34,6 +34,19 @@ describe('WelcomeScreen (Step 1)', () => {
     expect(stored.reduceMotion).toBe(true);
   });
 
+  it('lets the user opt into the playful diamond game theme', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<WelcomeScreen onEnter={() => {}} />);
+    const toggle = screen.getByLabelText(/Playful diamond theme/i);
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+    expect(toggle).toBeChecked();
+    const stored = JSON.parse(
+      localStorage.getItem('divergentia.preferences.v1') ?? '{}',
+    );
+    expect(stored.gameTheme).toBe(true);
+  });
+
   it('calls onEnter and marks onboarding complete', async () => {
     const user = userEvent.setup();
     const onEnter = vi.fn();

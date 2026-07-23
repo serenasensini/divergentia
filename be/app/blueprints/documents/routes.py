@@ -865,7 +865,8 @@ def summarize_document(document_id: str):
 
     Request Body:
         {
-            "summary_type": "brief"  # brief, detailed, executive
+            "summary_type": "brief",  # brief, detailed, executive
+            "add_to_document": false  # insert summary at top of the document
         }
 
     Returns:
@@ -893,9 +894,12 @@ def summarize_document(document_id: str):
 
     # Generate summary
     document_service = get_document_service()
+    output_folder = current_app.config['OUTPUT_FOLDER']
     result = document_service.summarize_document(
         document_id=document_id,
-        summary_type=validated_data.summary_type
+        summary_type=validated_data.summary_type,
+        add_to_document=validated_data.add_to_document,
+        output_folder=output_folder
     )
 
     return jsonify(result), 200
@@ -913,7 +917,8 @@ def paraphrase_document(document_id: str):
     Request Body:
         {
             "style": "formal",  # formal, casual, professional, simple
-            "sections": [0, 1, 2]  # Optional: specific sections to paraphrase
+            "sections": [0, 1, 2],  # Optional: specific sections to paraphrase
+            "apply_to_document": false  # rewrite the document body in place
         }
 
     Returns:
@@ -941,10 +946,13 @@ def paraphrase_document(document_id: str):
 
     # Paraphrase document
     document_service = get_document_service()
+    output_folder = current_app.config['OUTPUT_FOLDER']
     result = document_service.paraphrase_document(
         document_id=document_id,
         style=validated_data.style,
-        sections=validated_data.sections
+        sections=validated_data.sections,
+        apply_to_document=validated_data.apply_to_document,
+        output_folder=output_folder
     )
 
     return jsonify(result), 200

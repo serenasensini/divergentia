@@ -61,6 +61,12 @@ def _top_border(table):
     return b.get(qn('w:val')), b.get(qn('w:sz'))
 
 
+def _side_val(table, side):
+    """Return the ``w:val`` of a single outer border (e.g. 'double' or 'nil')."""
+    borders = table._element.find(qn('w:tblPr')).find(qn('w:tblBorders'))
+    return borders.find(qn(f'w:{side}')).get(qn('w:val'))
+
+
 class TestFraming:
     def test_sections_merge_into_single_table(self):
         doc = _frame({"sections": True})
@@ -117,3 +123,72 @@ class TestFraming:
             color = doc.tables[0]._element.find(qn('w:tblPr')).find(
                 qn('w:tblBorders')).find(qn('w:top')).get(qn('w:color'))
             assert color == "FF0000"
+
+
+class TestFramingAcrossPageBreak:
+    """A framed block that spans a page break becomes an open-ended box."""
+
+    def test_section_split_via_page_break_before(self):
+        with tempfile.TemporaryDirectory() as d:
+            inp = os.path.join(d, "in.docx")
+            out = os.path.join(d, "out.docx")
+            doc = Document()
+            doc.add_paragraph("Chapter One", style="Heading 1")
+            doc.add_paragraph("First part, before the page break.")
+            cont = doc.add_paragraph("Second part, on the next page.")
+            cont.paragraph_format.page_break_before = True
+            doc.save(inp)
+
+            res = get_formatting_service().apply_framing(
+                inp, out, {"sections": True, "use_tables": True})
+            assert res["success"] is True
+
+            out_doc = Document(out)
+            assert len(out_doc.tables) == 2
+            first, second = out_doc.tables
+
+            # First part: box open at the bottom (top + sides drawn).
+            assert _side_val(first, 'top') == 'double'
+            assert _side_val(first, 'left') == 'double'
+            assert _side_val(first, 'right') == 'double'
+            assert _side_val(first, 'bottom') == 'nil'
+
+            # Continuation: box open at the top (bottom + sides drawn).
+            assert _side_val(second, 'top') == 'nil'
+            assert _side_val(second, 'bottom') == 'double'
+            assert _side_val(second, 'left') == 'double'
+            assert _side_val(second, 'right') == 'double'
+
+    def test_paragraph_split_via_explicit_page_break(self):
+        from docx.enum.text import WD_BREAK
+
+        with tempfile.TemporaryDirectory() as d:
+            inp = os.path.join(d, "in.docx")
+            out = os.path.join(d, "out.docx")
+            doc = Document()
+            doc.add_paragraph("Title", style="Heading 1")
+            para = doc.add_paragraph("Text before the break.")
+            para.add_run().add_break(WD_BREAK.PAGE)
+            para.add_run(" Text after the break.")
+            doc.save(inp)
+
+            res = get_formatting_service().apply_framing(
+                inp, out, {"paragraphs": True, "use_tables": True})
+            assert res["success"] is True
+
+            out_doc = Document(out)
+            assert len(out_doc.tables) == 2
+            first, second = out_doc.tables
+            assert _side_val(first, 'top') == 'single'
+            assert _side_val(first, 'bottom') == 'nil'
+            assert _side_val(second, 'top') == 'nil'
+            assert _side_val(second, 'bottom') == 'single'
+
+    def test_single_page_block_keeps_full_box(self):
+        # No page break: behaviour is unchanged (one closed box).
+        doc = _frame({"sections": True})
+        assert len(doc.tables) == 1
+        t = doc.tables[0]
+        for side in ('top', 'bottom', 'left', 'right'):
+            assert _side_val(t, side) == 'double'
+

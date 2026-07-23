@@ -71,6 +71,69 @@ class OllamaService:
         params_str = '_'.join(f"{k}={v}" for k, v in sorted(kwargs.items()))
         return f"{operation}_{hash(text)}_{params_str}"
 
+    # Human readable names (in English) for the most common ISO 639-1 codes.
+    # Passing an explicit language name to the model yields more reliable
+    # results than only asking it to "keep the original language".
+    _LANGUAGE_NAMES: Dict[str, str] = {
+        'it': 'Italian',
+        'en': 'English',
+        'es': 'Spanish',
+        'fr': 'French',
+        'de': 'German',
+        'pt': 'Portuguese',
+        'nl': 'Dutch',
+        'ca': 'Catalan',
+        'ro': 'Romanian',
+    }
+
+    def _detect_language(self, text: str) -> Optional[str]:
+        """
+        Detect the language of ``text`` and return its ISO 639-1 code.
+
+        Uses the ``langdetect`` library. Returns ``None`` when the text is empty
+        or detection fails, so callers can gracefully fall back to a generic
+        "keep the original language" instruction.
+
+        Args:
+            text: Text to analyse
+
+        Returns:
+            ISO 639-1 language code (e.g. "it", "en") or ``None``.
+        """
+        if not text or not text.strip():
+            return None
+
+        try:
+            from langdetect import detect, DetectorFactory
+            # Make detection deterministic across runs.
+            DetectorFactory.seed = 0
+            language = detect(text)
+            logger.debug(f"Detected document language for summarization: '{language}'")
+            return language
+        except Exception as e:
+            logger.warning(f"Language detection failed ({str(e)}); summary language left generic")
+            return None
+
+    def _language_instruction(self, text: str) -> str:
+        """
+        Build a prompt instruction forcing the output language to match ``text``.
+
+        When the language can be detected and mapped to a known name the model
+        is told explicitly (e.g. "Write the summary in Italian."). Otherwise a
+        generic instruction to preserve the original language is used.
+        """
+        language = self._detect_language(text)
+        language_name = self._LANGUAGE_NAMES.get(language or '', None)
+        if language_name:
+            return (
+                f"Write the summary in {language_name}, the same language as the "
+                f"original text. Do not translate the content into any other language."
+            )
+        return (
+            "Write the summary in the same language as the original text. "
+            "Do not translate the content into any other language."
+        )
+
     @retry_on_failure(max_retries=3, delay=2.0)
     def _generate_completion(
         self,
@@ -144,6 +207,7 @@ class OllamaService:
 
         prompt = f"""Please provide a concise summary of the following text.
 The summary should be approximately {max_length} words or less, capturing the main points and key information.
+{self._language_instruction(text)}
 
 Text to summarize:
 {text}
@@ -195,6 +259,7 @@ Summary:"""
 
         prompt = f"""Please paraphrase the following text {style_instruction}.
 Maintain the original meaning while using different words and sentence structures.
+{self._language_instruction(text)}
 
 Original text:
 {text}

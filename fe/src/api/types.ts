@@ -146,6 +146,9 @@ export interface SummarizeResponse {
   original_length?: number;
   summary_length?: number;
   compression_ratio?: number;
+  added_to_document?: boolean;
+  download_url?: string;
+  filename?: string;
 }
 
 export interface ParaphraseResponse {
@@ -154,6 +157,9 @@ export interface ParaphraseResponse {
   style: string;
   total_sections?: number;
   paraphrased_sections?: Record<string, string>;
+  applied_to_document?: boolean;
+  download_url?: string;
+  filename?: string;
 }
 
 export interface TextSummarizeResponse {

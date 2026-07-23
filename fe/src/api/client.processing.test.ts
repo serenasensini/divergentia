@@ -71,9 +71,11 @@ describe('api client — processing endpoints', () => {
     );
     expect(JSON.parse(fetchImpl.mock.calls[0][1]?.body as string)).toEqual({
       summary_type: 'brief',
+      add_to_document: false,
     });
     expect(JSON.parse(fetchImpl.mock.calls[1][1]?.body as string)).toEqual({
       style: 'simple',
+      apply_to_document: false,
     });
   });
 

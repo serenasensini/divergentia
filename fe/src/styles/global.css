@@ -12,19 +12,19 @@
   --radius: 14px;
   --transition: 180ms ease;
 
-  /* Calm light theme (default) */
-  --bg: #eef3f6;
+  /* Warm light theme (default) — orange primary, violet secondary */
+  --bg: #faf4ee;
   --surface: #ffffff;
-  --surface-2: #f4f8fa;
-  --ink: #1f2a33;
-  --ink-soft: #4a5b67;
-  --primary: #3f7d8a;
+  --surface-2: #fbf3ea;
+  --ink: #251f1a;
+  --ink-soft: #5c4f45;
+  --primary: #e5731a;
   --primary-ink: #ffffff;
-  --accent: #d9c27a;
-  --focus: #1b6ac9;
+  --accent: #7c4dff;
+  --focus: #6d28d9;
   --danger: #9a3b3b;
   --ok: #2f6d4f;
-  --border: #d3dee4;
+  --border: #ece1d4;
   --font-size-base: 17px;
 }
 
@@ -38,18 +38,18 @@ html[data-font='atkinson'] { --font-active: var(--font-atkinson); }
 html[data-font='dyslexic'] { --font-active: var(--font-dyslexic); }
 
 html[data-theme='dark'] {
-  --bg: #161d22;
-  --surface: #1f292f;
-  --surface-2: #263239;
-  --ink: #eaf1f4;
-  --ink-soft: #b3c2cb;
-  --primary: #5aa7b5;
-  --primary-ink: #06131a;
-  --accent: #e0cd88;
-  --focus: #8ec5ff;
+  --bg: #1b1511;
+  --surface: #261d17;
+  --surface-2: #2f2419;
+  --ink: #f4ece5;
+  --ink-soft: #cbb9aa;
+  --primary: #ff9142;
+  --primary-ink: #1a0f06;
+  --accent: #b794f6;
+  --focus: #c4a7ff;
   --danger: #f0a0a0;
   --ok: #8fd6b0;
-  --border: #38474f;
+  --border: #453a30;
 }
 
 html[data-theme='high-contrast'] {
@@ -58,13 +58,27 @@ html[data-theme='high-contrast'] {
   --surface-2: #0a0a0a;
   --ink: #ffffff;
   --ink-soft: #ffffff;
-  --primary: #ffff00;
+  --primary: #ffa500;
   --primary-ink: #000000;
-  --accent: #00ffff;
-  --focus: #ffff00;
+  --accent: #d8a7ff;
+  --focus: #ffa500;
   --danger: #ff6b6b;
   --ok: #7cff9e;
   --border: #ffffff;
+}
+
+/* ------------------------------------------------------------------ *
+ * Optional "Sims"-inspired game skin (opt-in via the gameTheme
+ * preference). Saturated accents are layered ONLY as accent tokens over
+ * the existing calm neutral surfaces — large surfaces (bg/surface) are
+ * untouched so the low-stimulation design goal is preserved.
+ * ------------------------------------------------------------------ */
+html[data-game-theme='true'] {
+  --plumbob-green: #ff8c1a;
+  --plumbob-teal: #e5731a;
+  --plumbob-coral: #9b5de5;
+  --plumbob-yellow: #c77dff;
+  --plumbob-glow: rgba(255, 140, 26, 0.55);
 }
 
 *,
@@ -162,6 +176,55 @@ h1, h2 { line-height: 1.3; }
   background: transparent;
   color: var(--ink);
   border-color: var(--border);
+}
+
+/* Glossy, chunky game-theme buttons: rounded, gently beveled, with a soft
+   drop shadow and a diamond accent in front of primary actions. Purely a
+   visual skin layered over the same markup — no behaviour change. */
+html[data-game-theme='true'] .button {
+  border-radius: calc(var(--radius) + 6px);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.12), 0 6px 14px rgba(0, 0, 0, 0.1);
+}
+html[data-game-theme='true'] .button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 0 rgba(0, 0, 0, 0.12), 0 10px 18px rgba(0, 0, 0, 0.14);
+}
+html[data-game-theme='true'] .button:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.12), 0 3px 8px rgba(0, 0, 0, 0.1);
+}
+html[data-game-theme='true'] .button--primary {
+  background: linear-gradient(
+    160deg,
+    var(--plumbob-green, var(--primary)),
+    var(--plumbob-teal, var(--primary))
+  );
+}
+html[data-game-theme='true'] .button--primary::before {
+  content: '';
+  display: inline-block;
+  width: 0.55em;
+  height: 0.55em;
+  margin-right: 0.5em;
+  vertical-align: -0.05em;
+  background: currentColor;
+  transform: rotate(45deg);
+  border-radius: 2px;
+  opacity: 0.85;
+}
+
+/* Diamond-shaped icon button — for compact, primary-action icon buttons. */
+.button--diamond {
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 8px;
+  transform: rotate(45deg);
+}
+.button--diamond > * {
+  transform: rotate(-45deg);
 }
 
 /* ---------------- Welcome room ---------------- */
@@ -319,7 +382,10 @@ h1, h2 { line-height: 1.3; }
 .app-footer {
   padding: 1rem;
   display: flex;
+  flex-direction: row;
   justify-content: center;
+  align-items: center;
+  gap: 1.5rem;
   border-top: 1px solid var(--border);
 }
 
@@ -327,7 +393,7 @@ h1, h2 { line-height: 1.3; }
 .upload__enter { margin-top: 1.25rem; }
 
 .hub {
-  width: min(1100px, 100%);
+  width: min(1500px, 100%);
   margin: 0 auto;
   padding: 1.5rem 1rem 2rem;
 }
@@ -358,7 +424,27 @@ h1, h2 { line-height: 1.3; }
   margin-top: 1.5rem;
 }
 @media (min-width: 900px) {
-  .hub__layout { grid-template-columns: 1.6fr 1fr; align-items: start; }
+  /*
+   * Side-by-side layout: the preview is the priority element, so it takes the
+   * flexible track and grows with the viewport (letting the document render at
+   * its original width without horizontal scrolling). The tool stations are
+   * parked in a compact fixed-width band on the left.
+   */
+  .hub__layout {
+    grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+    align-items: start;
+  }
+  /* Without this, CSS Grid's default "auto" minimum size lets the
+     content of .station-grid (an auto-fit grid) force this track wider
+     than its band, stealing width from the preview column. */
+  .hub__stations {
+    min-width: 0;
+  }
+  /* One station card per row within the narrow band, so cards never overflow
+     and the freed-up width can go to the preview. */
+  .station-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .hub__group-title { font-size: 1.1rem; margin: 1.25rem 0 0.75rem; }
@@ -404,6 +490,91 @@ h1, h2 { line-height: 1.3; }
 .timeline__label { font-weight: 700; }
 .timeline__detail { color: var(--ink-soft); font-size: 0.9rem; }
 
+/* ------------------------------------------------------------------ *
+ * Plumbob motif + diamond step tracker (game theme).
+ * Falls back to the calm --primary/--accent tokens when the game theme
+ * preference is off, so the shape still renders sensibly everywhere.
+ * ------------------------------------------------------------------ */
+.plumbob {
+  --plumbob-size: 28px;
+  display: inline-block;
+  width: var(--plumbob-size);
+  height: var(--plumbob-size);
+  flex-shrink: 0;
+}
+.plumbob__facet {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: rotate(45deg);
+  border-radius: 4px;
+  background: linear-gradient(
+    135deg,
+    var(--plumbob-green, var(--primary)),
+    var(--plumbob-teal, var(--primary))
+  );
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+.plumbob--upcoming .plumbob__facet {
+  background: var(--surface-2);
+  border: 2px solid var(--border);
+  box-shadow: none;
+}
+.plumbob--current .plumbob__facet {
+  background: linear-gradient(
+    135deg,
+    var(--plumbob-yellow, var(--accent)),
+    var(--plumbob-coral, var(--accent))
+  );
+  box-shadow: 0 0 0 4px var(--plumbob-glow, transparent), 0 2px 8px rgba(0, 0, 0, 0.2);
+  animation: plumbob-pulse 1.8s ease-in-out infinite;
+}
+@keyframes plumbob-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px var(--plumbob-glow, transparent), 0 2px 8px rgba(0, 0, 0, 0.2); }
+  50% { box-shadow: 0 0 0 6px var(--plumbob-glow, transparent), 0 2px 8px rgba(0, 0, 0, 0.2); }
+}
+
+/* One-off spin/bounce played the moment a step is marked completed.
+   `animation-iteration-count: 1` means it self-terminates; the component
+   also clears the `celebrate` prop on `onAnimationEnd`. Like the pulse
+   above, it is automatically muted by the reduced-motion rules. */
+.plumbob--celebrate .plumbob__facet {
+  animation: plumbob-celebrate 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 1;
+}
+@keyframes plumbob-celebrate {
+  0% { transform: rotate(45deg) scale(1); }
+  35% { transform: rotate(225deg) scale(1.35); }
+  65% { transform: rotate(315deg) scale(1.1); }
+  100% { transform: rotate(405deg) scale(1); }
+}
+
+.diamond-tracker {
+  list-style: none;
+  margin: 0 0 1.5rem;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.25rem;
+}
+.diamond-tracker__item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.diamond-tracker__label {
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.hub__title-plumbob {
+  margin-right: 0.5rem;
+  vertical-align: middle;
+}
+.welcome__title-plumbob {
+  margin-right: 0.5rem;
+  vertical-align: middle;
+}
+
 /* Preview */
 .preview {
   background: var(--surface);
@@ -418,6 +589,7 @@ h1, h2 { line-height: 1.3; }
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 .preview__head h2 { margin: 0; font-size: 1.1rem; }
 .preview__counts { color: var(--ink-soft); font-size: 0.9rem; margin: 0.5rem 0; }
@@ -651,6 +823,56 @@ h1, h2 { line-height: 1.3; }
   width: 100%;
   height: min(70vh, 720px);
   border: 0;
-  background: #f4f8fa;
+  background: #faf3ea;
 }
 .docx-preview__frame[data-phase='loading'] { opacity: 0.5; }
+
+/* ------------------------------------------------------------------ *
+ * Responsive: small screens (phones / narrow viewports)
+ * The workshop hub is the primary post-upload surface — make sure its
+ * stations, actions and preview stack cleanly instead of overflowing.
+ * ------------------------------------------------------------------ */
+@media (max-width: 640px) {
+  .hub {
+    padding: 1rem 0.85rem 1.5rem;
+  }
+
+  /* Header: title block + actions stack vertically. */
+  .hub__header {
+    align-items: flex-start;
+  }
+  .hub__actions {
+    width: 100%;
+  }
+  .hub__actions .button {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+
+  /* One tool station per row so cards never overflow narrow screens. */
+  .station-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* In a single-column layout the preview should flow, not stick. */
+  .preview {
+    position: static;
+  }
+  .preview__controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .preview__modes {
+    flex: 1 1 auto;
+  }
+  .preview__modes .preview__mode {
+    flex: 1 1 auto;
+  }
+
+  /* Footer controls stay aligned horizontally on the same row, centered,
+     even on narrow screens (no wrapping). */
+  .app-footer {
+    flex-wrap: nowrap;
+    gap: 1rem;
+  }
+}

@@ -1,11 +1,14 @@
 import { useMemo, useState } from 'react';
 import { apiClient } from '../api/client';
 import { AssistantAvatar } from '../components/AssistantAvatar';
+import { DiamondStepTracker } from '../components/DiamondStepTracker';
 import { Drawer } from '../components/Drawer';
+import { Plumbob } from '../components/Plumbob';
 import { useDocument } from '../state/document';
 import { usePreferences } from '../state/preferences';
 import { useBackendStatus } from '../state/useBackendStatus';
 import { useI18n } from '../state/i18n';
+import { playSuccessChime } from '../utils/sound';
 import { PreviewPanel } from './workshop/PreviewPanel';
 import { STATIONS, STATION_GROUPS } from './workshop/stations';
 
@@ -26,6 +29,10 @@ export function WorkshopHub({ onNewDocument }: WorkshopHubProps) {
   const { documentId, documentName, steps } = useDocument();
   const [activeStationId, setActiveStationId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [completedStationIds, setCompletedStationIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [celebratingId, setCelebratingId] = useState<string | null>(null);
 
   const activeStation = useMemo(
     () => STATIONS.find((s) => s.id === activeStationId) ?? null,
@@ -34,7 +41,22 @@ export function WorkshopHub({ onNewDocument }: WorkshopHubProps) {
 
   if (!documentId) return null;
 
-  const bumpPreview = () => setRefreshKey((k) => k + 1);
+  const handleApplied = () => {
+    setRefreshKey((k) => k + 1);
+    if (!activeStationId) return;
+
+    setCompletedStationIds((prev) => {
+      if (prev.has(activeStationId)) return prev;
+      // Newly completed station: celebrate (only meaningful in game theme).
+      if (preferences.gameTheme) {
+        setCelebratingId(activeStationId);
+        if (preferences.soundEffects) {
+          playSuccessChime();
+        }
+      }
+      return new Set(prev).add(activeStationId);
+    });
+  };
 
   return (
     <main className="hub" aria-labelledby="hub-title">
@@ -44,7 +66,12 @@ export function WorkshopHub({ onNewDocument }: WorkshopHubProps) {
           asleep={!backend.aiAwake}
         />
         <div className="hub__heading">
-          <h1 id="hub-title">{t('hub.title')}</h1>
+          <h1 id="hub-title">
+            {preferences.gameTheme && (
+              <Plumbob state="current" size={24} className="hub__title-plumbob" />
+            )}
+            {t('hub.title')}
+          </h1>
           <p className="hub__doc">
             {t('hub.workingOn', { name: '' })}
             <strong>{documentName}</strong>
@@ -119,10 +146,28 @@ export function WorkshopHub({ onNewDocument }: WorkshopHubProps) {
 
           <section aria-labelledby="steps-title" className="hub__steps">
             <h2 id="steps-title" className="hub__group-title">
-              {t('hub.appliedSoFar')}
+              {preferences.gameTheme
+                ? t('hub.appliedSoFarGame')
+                : t('hub.appliedSoFar')}
             </h2>
+            {preferences.gameTheme && (
+              <DiamondStepTracker
+                steps={STATIONS.map((s) => ({
+                  id: s.id,
+                  label: t(`stations.${s.id}.title`),
+                }))}
+                completedIds={completedStationIds}
+                celebratingId={celebratingId}
+                onCelebrateEnd={() => setCelebratingId(null)}
+                aria-label={t('hub.appliedSoFar')}
+              />
+            )}
             {steps.length === 0 ? (
-              <p className="hub__steps-empty">{t('hub.nothingApplied')}</p>
+              <p className="hub__steps-empty">
+                {preferences.gameTheme
+                  ? t('hub.nothingAppliedGame')
+                  : t('hub.nothingApplied')}
+              </p>
             ) : (
               <ol className="timeline">
                 {steps.map((step) => (
@@ -147,7 +192,7 @@ export function WorkshopHub({ onNewDocument }: WorkshopHubProps) {
         {activeStation && (
           <activeStation.Component
             documentId={documentId}
-            onApplied={bumpPreview}
+            onApplied={handleApplied}
           />
         )}
       </Drawer>

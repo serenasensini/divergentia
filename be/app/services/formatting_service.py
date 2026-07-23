@@ -3,7 +3,7 @@ Document Formatting Service - Handle document style modifications
 """
 import logging
 import re
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, Set
 from pathlib import Path
 
 from docx import Document
@@ -304,11 +304,11 @@ class FormattingService:
                 return "PDF spacing is currently under development and has limited support"
                 # return self._apply_framing_pdf(input_path, output_path, framing_options)
             else:
-                raise FormattingException(f"Framing not supported for {file_extension}")
+                raise FormattingException(f"Spacing not supported for {file_extension}")
 
         except Exception as e:
-            logger.error(f"Framing error: {str(e)}")
-            raise FormattingException(f"Failed to apply framing: {str(e)}")
+            logger.error(f"Spacing error: {str(e)}")
+            raise FormattingException(f"Failed to apply spacing: {str(e)}")
 
     def apply_keywords(
         self,
@@ -351,6 +351,271 @@ class FormattingService:
         except Exception as e:
             logger.error(f"Keyword extraction error: {str(e)}")
             raise FormattingException(f"Failed to apply keyword extraction: {str(e)}")
+
+    # Localised heading placed above the inserted summary block.
+    SUMMARY_LABELS: Dict[str, str] = {
+        'it': 'Riassunto',
+        'en': 'Summary',
+        'es': 'Resumen',
+        'fr': 'Résumé',
+        'de': 'Zusammenfassung',
+        'pt': 'Resumo',
+        'nl': 'Samenvatting',
+        'ca': 'Resum',
+        'ro': 'Rezumat',
+    }
+    DEFAULT_SUMMARY_LANGUAGE = 'en'
+
+    # Space after the inserted summary block so it is separated from the body.
+    SUMMARY_SPACING_AFTER_TWIPS = 240  # 12pt
+
+    def _make_summary_paragraph_element(
+        self,
+        text: str,
+        *,
+        bold: bool = False,
+        italic: bool = False,
+        size_half_points: int = 22,
+        space_after_twips: int = 0,
+    ):
+        """Build a standalone ``w:p`` OpenXML element with basic run formatting.
+
+        Args:
+            text: Paragraph text.
+            bold: Whether the run is bold.
+            italic: Whether the run is italic.
+            size_half_points: Font size expressed in half-points (e.g. 22 = 11pt).
+            space_after_twips: Spacing after the paragraph, in twips.
+
+        Returns:
+            An ``OxmlElement`` representing the paragraph.
+        """
+        para_element = OxmlElement('w:p')
+
+        if space_after_twips:
+            pPr = OxmlElement('w:pPr')
+            spacing = OxmlElement('w:spacing')
+            spacing.set(qn('w:after'), str(space_after_twips))
+            pPr.append(spacing)
+            para_element.append(pPr)
+
+        run_element = OxmlElement('w:r')
+        rPr = OxmlElement('w:rPr')
+        if bold:
+            rPr.append(OxmlElement('w:b'))
+        if italic:
+            rPr.append(OxmlElement('w:i'))
+        sz = OxmlElement('w:sz')
+        sz.set(qn('w:val'), str(size_half_points))
+        rPr.append(sz)
+        run_element.append(rPr)
+
+        text_element = OxmlElement('w:t')
+        # Preserve leading/trailing whitespace inside the run.
+        text_element.set(qn('xml:space'), 'preserve')
+        text_element.text = text
+        run_element.append(text_element)
+        para_element.append(run_element)
+
+        return para_element
+
+    def insert_summary(
+        self,
+        input_path: str,
+        output_path: str,
+        summary_text: str
+    ) -> Dict[str, Any]:
+        """
+        Insert a summary block at the top of the document.
+
+        The summary is placed after the document title (if one is detected) and
+        before the actual body content. When no title is present it is inserted
+        at the very beginning of the document. A localised heading (e.g.
+        "Summary" / "Riassunto") is added above the summary text, in the same
+        language as the summary itself.
+
+        Args:
+            input_path: Input file path (only DOCX is supported).
+            output_path: Output file path.
+            summary_text: The summary to insert.
+
+        Returns:
+            Result information about the operation.
+        """
+        logger.info(f"Inserting summary into {input_path}")
+
+        file_extension = Path(input_path).suffix.lower().lstrip('.')
+        if file_extension != 'docx':
+            raise FormattingException(
+                f"Adding the summary to the document is only supported for DOCX "
+                f"files, got: {file_extension or 'unknown'}",
+                payload={'supported_formats': ['docx']}
+            )
+
+        if not summary_text or not summary_text.strip():
+            raise FormattingException("Cannot insert an empty summary into the document")
+
+        try:
+            from app.services.keyword_service import get_keyword_service
+
+            doc = Document(input_path)
+            structure = self._build_structure(doc, source_path=input_path)
+
+            # Localise the heading using the summary language.
+            language = get_keyword_service().detect_language(summary_text)
+            label = self.SUMMARY_LABELS.get(
+                language, self.SUMMARY_LABELS[self.DEFAULT_SUMMARY_LANGUAGE]
+            )
+
+            label_element = self._make_summary_paragraph_element(
+                label, bold=True, size_half_points=26  # 13pt heading
+            )
+            body_element = self._make_summary_paragraph_element(
+                summary_text.strip(),
+                italic=True,
+                size_half_points=22,  # 11pt
+                space_after_twips=self.SUMMARY_SPACING_AFTER_TWIPS,
+            )
+
+            title_indices = self._identify_main_title(doc, structure)
+
+            if title_indices:
+                # Insert right after the last title paragraph. addnext inserts
+                # immediately after the anchor, so add the body first and the
+                # label second to obtain: title, label, body.
+                anchor = doc.paragraphs[max(title_indices)]._element
+                anchor.addnext(body_element)
+                anchor.addnext(label_element)
+                position = 'after_title'
+            elif doc.paragraphs:
+                # No title: insert before the first paragraph. addprevious keeps
+                # inserting before the same anchor, producing: label, body, first.
+                first = doc.paragraphs[0]._element
+                first.addprevious(label_element)
+                first.addprevious(body_element)
+                position = 'document_start'
+            else:
+                # Empty document body: append directly.
+                doc.element.body.append(label_element)
+                doc.element.body.append(body_element)
+                position = 'empty_document'
+
+            doc.save(output_path)
+            logger.info(f"Summary inserted ({position}) and saved to {output_path}")
+
+            return {
+                'success': True,
+                'output_path': output_path,
+                'format': 'docx',
+                'summary_added': True,
+                'summary_position': position,
+                'summary_language': language,
+            }
+
+        except FormattingException:
+            raise
+        except Exception as e:
+            logger.error(f"Summary insertion error: {str(e)}")
+            raise FormattingException(f"Failed to insert summary into document: {str(e)}")
+
+    def _replace_paragraph_text(self, paragraph, new_text: str) -> None:
+        """Replace a paragraph's text while preserving paragraph-level style.
+
+        All existing runs are removed (dropping inline run formatting, which
+        cannot be meaningfully preserved when the wording changes) and a single
+        run with ``new_text`` is added. The paragraph style, alignment and
+        spacing are kept intact.
+
+        Args:
+            paragraph: python-docx paragraph object.
+            new_text: The replacement text.
+        """
+        for run in list(paragraph.runs):
+            run._element.getparent().remove(run._element)
+        paragraph.add_run(new_text)
+
+    def apply_paraphrase(
+        self,
+        input_path: str,
+        output_path: str,
+        paraphrase_options: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Rewrite the document body with a paraphrased version of its text.
+
+        Each body paragraph is paraphrased via Ollama (in the same language as
+        the original text) and rewritten in place. Document titles and headings
+        are left untouched so the structure of the document is preserved.
+
+        Args:
+            input_path: Input file path (only DOCX is supported).
+            output_path: Output file path.
+            paraphrase_options: Dictionary with paraphrase options:
+                - style (str): Paraphrasing style (e.g. 'simple', 'casual',
+                  'professional'). Default: 'simple'.
+
+        Returns:
+            Result information about the operation.
+        """
+        logger.info(f"Applying paraphrase to {input_path}")
+
+        file_extension = Path(input_path).suffix.lower().lstrip('.')
+        if file_extension != 'docx':
+            raise FormattingException(
+                f"Applying the paraphrase to the document is only supported for "
+                f"DOCX files, got: {file_extension or 'unknown'}",
+                payload={'supported_formats': ['docx']}
+            )
+
+        try:
+            from app.services.ollama_service import get_ollama_service
+
+            style = paraphrase_options.get('style', 'simple')
+            ollama_service = get_ollama_service()
+
+            doc = Document(input_path)
+
+            paragraphs_processed = 0
+            for para in doc.paragraphs:
+                text = para.text.strip()
+                if not text:
+                    continue
+
+                # Preserve document title and headings; only rewrite body text.
+                if self._is_main_title(para) or self._is_heading(para):
+                    continue
+
+                try:
+                    paraphrased = ollama_service.paraphrase_text(text, style=style)
+                except Exception as e:
+                    logger.warning(
+                        f"Paraphrase failed for a paragraph ({str(e)}); keeping original text"
+                    )
+                    continue
+
+                if paraphrased and paraphrased.strip():
+                    self._replace_paragraph_text(para, paraphrased.strip())
+                    paragraphs_processed += 1
+
+            doc.save(output_path)
+            logger.info(
+                f"Paraphrase applied to {paragraphs_processed} paragraphs, saved to {output_path}"
+            )
+
+            return {
+                'success': True,
+                'output_path': output_path,
+                'format': 'docx',
+                'paraphrase_applied': True,
+                'paragraphs_processed': paragraphs_processed,
+                'style': style,
+            }
+
+        except FormattingException:
+            raise
+        except Exception as e:
+            logger.error(f"Paraphrase application error: {str(e)}")
+            raise FormattingException(f"Failed to apply paraphrase to document: {str(e)}")
 
     def apply_highlighting(
         self,
@@ -2143,6 +2408,17 @@ class FormattingService:
 
     def _copy_paragraph_into(self, dest_paragraph, source_paragraph, preserve_spacing: bool = True) -> None:
         """Copy style, alignment, spacing and all runs from source into dest."""
+        self._copy_runs_into(
+            dest_paragraph, source_paragraph,
+            list(source_paragraph.runs), preserve_spacing
+        )
+
+    def _copy_runs_into(self, dest_paragraph, source_paragraph, runs, preserve_spacing: bool = True) -> None:
+        """Copy style/alignment/spacing from source and only the given runs.
+
+        Used when a source paragraph is split across a page break: each half is
+        copied into its own segment table while keeping the original formatting.
+        """
         try:
             dest_paragraph.style = source_paragraph.style
         except Exception:
@@ -2158,9 +2434,87 @@ class FormattingService:
             if src_fmt.space_after is not None:
                 dest_paragraph.paragraph_format.space_after = src_fmt.space_after
 
-        for run in source_paragraph.runs:
+        for run in runs:
             new_run = dest_paragraph.add_run(run.text)
             self._copy_run_formatting(run, new_run)
+
+    @staticmethod
+    def _has_page_break_before(paragraph) -> bool:
+        """True if the paragraph carries a ``pageBreakBefore`` property."""
+        try:
+            return bool(paragraph.paragraph_format.page_break_before)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _run_has_page_break(run) -> bool:
+        """True if a run contains an explicit or last-rendered page break."""
+        el = run._element
+        for br in el.findall(qn('w:br')):
+            if br.get(qn('w:type')) == 'page':
+                return True
+        if el.find(qn('w:lastRenderedPageBreak')) is not None:
+            return True
+        return False
+
+    def _split_runs_at_page_break(self, paragraph) -> List[List]:
+        """Split a paragraph's runs into groups separated by page breaks.
+
+        Returns a list with one group when the paragraph does not cross a page,
+        or several groups when it contains explicit ``w:br type="page"`` (or a
+        rendered page-break hint). The break marker itself is dropped: the new
+        segment table on the following page already provides the visual split.
+        """
+        groups: List[List] = [[]]
+        for run in paragraph.runs:
+            if self._run_has_page_break(run):
+                if run.text:
+                    groups[-1].append(run)
+                groups.append([])
+            else:
+                groups[-1].append(run)
+        return groups
+
+    def _segment_block_by_page_breaks(self, paragraphs: List) -> List[List[Tuple]]:
+        """Split a block of paragraphs into page-delimited segments.
+
+        Each segment is a list of ``(source_paragraph, runs)`` tuples. A new
+        segment starts when a paragraph requests ``pageBreakBefore`` or when a
+        paragraph's runs contain a page break. Segments with no real content are
+        dropped; if nothing splits, a single segment with all paragraphs is
+        returned (identical to the previous single-box behaviour).
+        """
+        segments: List[List[Tuple]] = [[]]
+        for idx, para in enumerate(paragraphs):
+            if idx > 0 and self._has_page_break_before(para):
+                segments.append([])
+            run_groups = self._split_runs_at_page_break(para)
+            for gi, runs in enumerate(run_groups):
+                if gi > 0:
+                    segments.append([])
+                segments[-1].append((para, runs))
+
+        cleaned = [seg for seg in segments if any(runs for _, runs in seg)]
+        if not cleaned:
+            return [[(p, list(p.runs)) for p in paragraphs]]
+        return cleaned
+
+    @staticmethod
+    def _add_page_break_paragraph_after(element):
+        """Insert a paragraph containing a page break right after ``element``.
+
+        A paragraph is required between two tables anyway; making it a page
+        break guarantees the continuation box starts at the top of the next
+        page. Returns the inserted ``w:p`` element.
+        """
+        p = OxmlElement('w:p')
+        r = OxmlElement('w:r')
+        br = OxmlElement('w:br')
+        br.set(qn('w:type'), 'page')
+        r.append(br)
+        p.append(r)
+        element.addnext(p)
+        return p
 
     def _insert_table_at(self, doc, anchor_element, before: bool = True):
         """Create a 1x1 table and insert it relative to ``anchor_element``.
@@ -2197,15 +2551,19 @@ class FormattingService:
         preserve_spacing: bool = True
     ) -> None:
         """
-        Encapsulate one or more consecutive paragraphs in a single 1x1 table.
+        Encapsulate one or more consecutive paragraphs in 1x1 table(s).
 
-        All provided paragraphs are moved into the same table cell (each keeps
-        its own line/paragraph inside the cell), the table is inserted at the
-        position of the first paragraph, the originals are removed and an empty
-        paragraph is appended after the table for visual separation.
+        When the block fits on a single page it is wrapped in one bordered
+        table, exactly as before. When the block spans a page break (an explicit
+        ``w:br type="page"``, a ``pageBreakBefore`` paragraph, or a rendered
+        page-break hint) it is split into one table per page, and each table
+        draws an *open* box: the first part shows top/left/right borders, the
+        continuation shows bottom/left/right, and any middle part shows only the
+        left/right sides. A forced page break is inserted between the parts so
+        the continuation starts at the top of the next page.
 
         Args:
-            paragraphs: List of python-docx paragraphs to wrap in one cell.
+            paragraphs: List of python-docx paragraphs to wrap.
             doc: python-docx document object.
             border_width: Border width in eighths of a point.
             border_color: Border color in hex format without #.
@@ -2223,18 +2581,33 @@ class FormattingService:
 
         first_element = paragraphs[0]._element
 
-        # Insert the table just before the first paragraph.
-        table, cell = self._insert_table_at(doc, first_element, before=True)
-        table_element = table._element
+        # Split the block into page-delimited segments (usually just one).
+        segments = self._segment_block_by_page_breaks(paragraphs)
+        total = len(segments)
 
-        # Copy each source paragraph into the single cell.
-        for i, src in enumerate(paragraphs):
-            dest = cell.paragraphs[0] if i == 0 else cell.add_paragraph()
-            self._copy_paragraph_into(dest, src, preserve_spacing)
+        cursor = None  # last inserted element; drives ordering of the segments.
+        last_table_element = None
+        for index, segment in enumerate(segments):
+            if cursor is None:
+                # First segment: insert right before the original block.
+                table, cell = self._insert_table_at(doc, first_element, before=True)
+            else:
+                # Continuation on the next page: force a page break, then table.
+                pb = self._add_page_break_paragraph_after(cursor)
+                table, cell = self._insert_table_at(doc, pb, before=False)
 
-        # Apply borders and margins.
-        self._set_table_borders(table, border_width, border_color, border_style)
-        self._set_table_cell_margins(table, cell_margin)
+            # Copy each (paragraph, runs) piece into its own line in the cell.
+            for i, (src, runs) in enumerate(segment):
+                dest = cell.paragraphs[0] if i == 0 else cell.add_paragraph()
+                self._copy_runs_into(dest, src, runs, preserve_spacing)
+
+            # Draw only the edges appropriate for this segment's position.
+            edges = self._segment_edges(index, total)
+            self._set_table_borders_edges(table, border_width, border_color, border_style, edges)
+            self._set_table_cell_margins(table, cell_margin)
+
+            last_table_element = table._element
+            cursor = last_table_element
 
         # Remove the original paragraphs from the body.
         for src in paragraphs:
@@ -2244,11 +2617,12 @@ class FormattingService:
                 parent.remove(el)
 
         # Trailing empty paragraph so tables don't merge and blocks stay separated.
-        self._add_empty_paragraph_after(table_element)
+        if last_table_element is not None:
+            self._add_empty_paragraph_after(last_table_element)
 
         logger.debug(
-            f"Encapsulated {len(paragraphs)} paragraph(s) in a table: "
-            f"'{cell.paragraphs[0].text[:50]}...'"
+            f"Encapsulated {len(paragraphs)} paragraph(s) in {total} table(s) "
+            f"(split across {total} page segment(s))"
         )
 
     def _encapsulate_paragraph_in_table(
@@ -2345,13 +2719,44 @@ class FormattingService:
         border_style: str
     ) -> None:
         """
-        Set borders for a table.
+        Set all four borders for a table (top, left, bottom, right).
+
+        Thin wrapper over :meth:`_set_table_borders_edges` kept for backward
+        compatibility: it draws the full box.
 
         Args:
             table: python-docx table object
             border_width: Border width in eighths of a point
             border_color: Border color in hex format without #
             border_style: Border style (single, double, dashed, etc.)
+        """
+        self._set_table_borders_edges(
+            table, border_width, border_color, border_style,
+            {'top', 'left', 'bottom', 'right'}
+        )
+
+    def _set_table_borders_edges(
+        self,
+        table,
+        border_width: int,
+        border_color: str,
+        border_style: str,
+        edges: Set[str]
+    ) -> None:
+        """
+        Set only the requested outer borders for a table.
+
+        Edges not listed in ``edges`` are explicitly emitted as ``w:val="nil"``
+        so they are invisible. This is what lets a block that spans a page break
+        render as an open-ended box: the first part shows ``top/left/right`` and
+        the continuation shows ``bottom/left/right``.
+
+        Args:
+            table: python-docx table object
+            border_width: Border width in eighths of a point
+            border_color: Border color in hex format without #
+            border_style: Border style (single, double, dashed, etc.)
+            edges: Subset of ``{'top', 'left', 'bottom', 'right'}`` to draw.
         """
         tbl = table._element
         tblPr = tbl.find(qn('w:tblPr'))
@@ -2364,18 +2769,41 @@ class FormattingService:
         if existing_borders is not None:
             tblPr.remove(existing_borders)
 
-        # Create new borders
+        # Create new borders. Inner borders are always suppressed (1x1 table).
         tblBorders = OxmlElement('w:tblBorders')
 
         for border_name in ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']:
             border = OxmlElement(f'w:{border_name}')
-            border.set(qn('w:val'), border_style)
-            border.set(qn('w:sz'), str(border_width))
-            border.set(qn('w:space'), '0')
-            border.set(qn('w:color'), border_color)
+            if border_name in edges:
+                border.set(qn('w:val'), border_style)
+                border.set(qn('w:sz'), str(border_width))
+                border.set(qn('w:space'), '0')
+                border.set(qn('w:color'), border_color)
+            else:
+                # Invisible edge (open side of the box).
+                border.set(qn('w:val'), 'nil')
             tblBorders.append(border)
 
         tblPr.append(tblBorders)
+
+    @staticmethod
+    def _segment_edges(index: int, total: int) -> Set[str]:
+        """
+        Return which box edges a table segment should draw.
+
+        For a block split across ``total`` pages:
+        - a single segment draws the full box;
+        - the first segment omits the bottom (box stays open downward);
+        - the last segment omits the top (box stays open upward);
+        - middle segments draw only the left/right sides.
+        """
+        if total <= 1:
+            return {'top', 'left', 'bottom', 'right'}
+        if index == 0:
+            return {'top', 'left', 'right'}
+        if index == total - 1:
+            return {'bottom', 'left', 'right'}
+        return {'left', 'right'}
 
     def _set_table_cell_margins(self, table, margin: int) -> None:
         """

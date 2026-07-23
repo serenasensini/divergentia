@@ -87,8 +87,8 @@ export function FormatStation({ documentId, onApplied }: StationProps) {
     captions: false,
     bibliography: false,
   });
-  const [positive, setPositive] = useState('#3f7d8a');
-  const [negative, setNegative] = useState('#9a3b3b');
+  const [positive, setPositive] = useState('#ff7f00');
+  const [negative, setNegative] = useState('#007fff');
   const [scheme, setScheme] =
     useState<NonNullable<FormattingOptions['theme']>['scheme']>('even');
   const [fromOriginal, setFromOriginal] = useState(false);
@@ -531,6 +531,7 @@ export function SummarizeStation({ documentId, onApplied }: StationProps) {
   const { addStep } = useDocument();
   const { phase, message, run } = useStationRunner();
   const [summaryType, setSummaryType] = useState<SummaryType>('brief');
+  const [addToDocument, setAddToDocument] = useState(false);
   const [result, setResult] = useState<SummarizeResponse | null>(null);
   return (
     <form
@@ -541,6 +542,7 @@ export function SummarizeStation({ documentId, onApplied }: StationProps) {
             const res = await apiClient.summarizeDocument(
               documentId,
               summaryType,
+              addToDocument,
             );
             setResult(res);
             addStep(
@@ -571,12 +573,26 @@ export function SummarizeStation({ documentId, onApplied }: StationProps) {
           ))}
         </select>
       </div>
+      <div className="field field--switch">
+        <input
+          id="sum-add-to-document"
+          type="checkbox"
+          checked={addToDocument}
+          onChange={(e) => setAddToDocument(e.target.checked)}
+        />
+        <label htmlFor="sum-add-to-document">
+          {t('summarize.addToDocument')}
+        </label>
+      </div>
       <SubmitButton phase={phase} label={t('summarize.apply')} />
       <StatusLine phase={phase} message={message} />
       {result && (
         <div className="station__result">
           <h3>{t('summarize.resultTitle')}</h3>
           <p>{result.summary}</p>
+          {result.added_to_document && (
+            <p className="station__hint">{t('summarize.addedToDocument')}</p>
+          )}
           {result.key_points && result.key_points.length > 0 && (
             <>
               <h4>{t('summarize.keyPoints')}</h4>
@@ -598,6 +614,7 @@ export function ParaphraseStation({ documentId, onApplied }: StationProps) {
   const { addStep } = useDocument();
   const { phase, message, run } = useStationRunner();
   const [style, setStyle] = useState<ParaphraseStyle>('simple');
+  const [applyToDocument, setApplyToDocument] = useState(false);
   const [result, setResult] = useState<ParaphraseResponse | null>(null);
   return (
     <form
@@ -605,7 +622,11 @@ export function ParaphraseStation({ documentId, onApplied }: StationProps) {
         e.preventDefault();
         void run(
           async () => {
-            const res = await apiClient.paraphraseDocument(documentId, style);
+            const res = await apiClient.paraphraseDocument(
+              documentId,
+              style,
+              applyToDocument,
+            );
             setResult(res);
             addStep(
               t('paraphrase.stepLabel'),
@@ -637,8 +658,22 @@ export function ParaphraseStation({ documentId, onApplied }: StationProps) {
           )}
         </select>
       </div>
+      <div className="field field--switch">
+        <input
+          id="par-apply-to-document"
+          type="checkbox"
+          checked={applyToDocument}
+          onChange={(e) => setApplyToDocument(e.target.checked)}
+        />
+        <label htmlFor="par-apply-to-document">
+          {t('paraphrase.applyToDocument')}
+        </label>
+      </div>
       <SubmitButton phase={phase} label={t('paraphrase.apply')} />
       <StatusLine phase={phase} message={message} />
+      {result?.applied_to_document && (
+        <p className="station__hint">{t('paraphrase.appliedToDocument')}</p>
+      )}
       {result?.paraphrased_sections && (
         <div className="station__result">
           <h3>{t('paraphrase.resultTitle')}</h3>

@@ -371,7 +371,9 @@ class DocumentService:
     def summarize_document(
         self,
         document_id: str,
-        summary_type: str = 'brief'
+        summary_type: str = 'brief',
+        add_to_document: bool = False,
+        output_folder: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generate summary of document.
@@ -379,9 +381,15 @@ class DocumentService:
         Args:
             document_id: Document ID
             summary_type: Type of summary
+            add_to_document: When True, the generated summary is inserted at the
+                top of the document (after the title, before the body content)
+                and a new processed version is produced.
+            output_folder: Folder to save the processed document. Required when
+                ``add_to_document`` is True.
 
         Returns:
-            Summary information
+            Summary information. When ``add_to_document`` is True the response
+            also contains ``download_url`` and ``filename`` for the updated file.
         """
         logger.info(f"Summarizing document {document_id} (type: {summary_type})")
 
@@ -400,18 +408,51 @@ class DocumentService:
             summary_type=summary_type
         )
 
-        return {
+        response = {
             'document_id': document_id,
             'document_name': document['original_filename'],
             **summary_result
         }
+
+        # Optionally insert the summary at the top of the document.
+        if add_to_document:
+            if not output_folder:
+                raise FileProcessingException(
+                    "output_folder is required to add the summary to the document"
+                )
+
+            timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+            output_filename = cap_filename(
+                f"summarized_{timestamp}_{document['original_filename']}"
+            )
+            output_path = os.path.join(output_folder, output_filename)
+
+            # Insert into the latest processed version so it chains with any
+            # previous operations.
+            insert_result = self.formatting_service.insert_summary(
+                self._source_path(document),
+                output_path,
+                summary_result['summary']
+            )
+
+            finalized = self._finalize(document, output_path, insert_result)
+            # Merge the download metadata into the summary response.
+            response.update({
+                'download_url': finalized.get('download_url'),
+                'filename': finalized.get('filename'),
+                'added_to_document': True,
+            })
+
+        return response
 
 
     def paraphrase_document(
         self,
         document_id: str,
         style: str = 'formal',
-        sections: Optional[list] = None
+        sections: Optional[list] = None,
+        apply_to_document: bool = False,
+        output_folder: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Paraphrase document or specific sections.
@@ -420,9 +461,15 @@ class DocumentService:
             document_id: Document ID
             style: Paraphrasing style
             sections: Optional list of section indices to paraphrase
+            apply_to_document: When True, the paraphrase is written back into the
+                document body (rewriting the content in place, preserving titles
+                and headings) and a new processed version is produced.
+            output_folder: Folder to save the processed document. Required when
+                ``apply_to_document`` is True.
 
         Returns:
-            Paraphrased content
+            Paraphrased content. When ``apply_to_document`` is True the response
+            also contains ``download_url`` and ``filename`` for the updated file.
         """
         logger.info(f"Paraphrasing document {document_id} (style: {style})")
 
@@ -458,13 +505,44 @@ class DocumentService:
                 idx: text for idx, text in enumerate(paraphrased_chunks)
             }
 
-        return {
+        response = {
             'document_id': document_id,
             'document_name': document['original_filename'],
             'style': style,
             'total_sections': len(chunks),
             'paraphrased_sections': paraphrased_sections
         }
+
+        # Optionally rewrite the document body with the paraphrased text.
+        if apply_to_document:
+            if not output_folder:
+                raise FileProcessingException(
+                    "output_folder is required to apply the paraphrase to the document"
+                )
+
+            timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+            output_filename = cap_filename(
+                f"paraphrased_{timestamp}_{document['original_filename']}"
+            )
+            output_path = os.path.join(output_folder, output_filename)
+
+            # Rewrite the latest processed version so it chains with any
+            # previous operations.
+            paraphrase_result = self.formatting_service.apply_paraphrase(
+                self._source_path(document),
+                output_path,
+                {'style': style}
+            )
+
+            finalized = self._finalize(document, output_path, paraphrase_result)
+            # Merge the download metadata into the paraphrase response.
+            response.update({
+                'download_url': finalized.get('download_url'),
+                'filename': finalized.get('filename'),
+                'applied_to_document': True,
+            })
+
+        return response
 
     def delete_document(self, document_id: str) -> bool:
         """

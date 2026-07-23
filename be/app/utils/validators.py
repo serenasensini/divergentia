@@ -172,6 +172,11 @@ class SummarizeRequestSchema(BaseModel):
     """Schema for summarization request"""
     summary_type: Optional[str] = Field('brief', description="Type of summary")
     max_length: Optional[int] = Field(500, ge=50, le=2000, description="Maximum summary length")
+    add_to_document: Optional[bool] = Field(
+        False,
+        description="Insert the summary at the top of the document, after the "
+                    "title and before the body content"
+    )
 
     @validator('summary_type')
     def validate_summary_type(cls, v):
@@ -186,6 +191,11 @@ class ParaphraseRequestSchema(BaseModel):
     """Schema for paraphrase request"""
     style: Optional[str] = Field('simple', description="Paraphrasing style")
     sections: Optional[List[int]] = Field(None, description="Specific sections to paraphrase")
+    apply_to_document: Optional[bool] = Field(
+        False,
+        description="Apply the paraphrase to the document body (rewriting the "
+                    "content in place) and produce a new processed version"
+    )
 
     @validator('style')
     def validate_style(cls, v):

@@ -45,6 +45,7 @@ const en = {
     textSize: 'Text size',
     reduceMotion: 'Reduce motion and animation',
     classicMode: 'Classic mode (plain layout, no game scene)',
+    gameTheme: 'Playful diamond theme (Sims-style step markers and colours)',
     enter: 'Enter the workshop',
     fonts: {
       system: 'Default',
@@ -242,6 +243,9 @@ const en = {
     stepDetail: '{type} summary created.',
     resultTitle: 'Summary',
     keyPoints: 'Key points',
+    addToDocument:
+      'Add the summary to the top of the document, after the title and before the content',
+    addedToDocument: 'The summary was added to the top of the document.',
     types: { brief: 'Brief', detailed: 'Detailed', executive: 'Executive' },
   },
   paraphrase: {
@@ -253,6 +257,9 @@ const en = {
     stepLabel: 'Rephrase',
     stepDetail: '{style} rewrite created.',
     resultTitle: 'Rephrased sections',
+    applyToDocument:
+      'Apply the rewrite to the document, replacing the body content (titles and headings are kept)',
+    appliedToDocument: 'The rewrite was applied to the document.',
     styles: {
       simple: 'Simple',
       casual: 'Casual',
@@ -283,7 +290,7 @@ const it: Dict = {
   },
   app: {
     skip: 'Vai al contenuto principale',
-    settings: 'Impostazioni e compagno',
+    settings: 'Impostazioni generali',
   },
   language: {
     label: 'Lingua',
@@ -302,6 +309,9 @@ const it: Dict = {
     textSize: 'Dimensione del testo',
     reduceMotion: 'Riduci movimento e animazioni',
     classicMode: 'Modalità classica (layout semplice, senza scena di gioco)',
+    gameTheme: 'Tema diamante giocoso (indicatori di passo e colori stile Sims)',
+    soundEffects:
+      'Riproduci un lieve suono quando completi una tappa (tema diamante)',
     enter: 'Entra nel laboratorio',
     fonts: {
       system: 'Predefinito',
@@ -346,12 +356,15 @@ const it: Dict = {
   hub: {
     title: 'Il tuo laboratorio',
     workingOn: 'Stai lavorando su {name}',
-    bringAnother: 'Porta un altro documento',
+    bringAnother: 'Carica un nuovo documento',
     napping:
       'Il tuo assistente sta riposando, quindi gli strumenti AI (parole chiave, riassunto, riformulazione) riposano per ora. Gli strumenti di lettura funzionano comunque.',
     appliedSoFar: 'Applicato finora',
+    appliedSoFarGame: 'Sbloccato finora',
     nothingApplied:
       'Ancora nulla di applicato. Scegli uno strumento per iniziare — puoi annullare ripartendo dall\'originale dentro qualsiasi strumento.',
+    nothingAppliedGame:
+      'Ancora nessuna tappa sbloccata. Scegli una stazione per iniziare la tua impresa — puoi sempre ripartire dall\'originale dentro qualsiasi strumento.',
     ai: ' · AI',
   },
   groups: {
@@ -497,6 +510,9 @@ const it: Dict = {
     stepDetail: 'Creato riassunto {type}.',
     resultTitle: 'Riassunto',
     keyPoints: 'Punti chiave',
+    addToDocument:
+      'Aggiungi il riassunto all\'inizio del documento, dopo il titolo e prima del contenuto',
+    addedToDocument: 'Il riassunto è stato aggiunto all\'inizio del documento.',
     types: { brief: 'Breve', detailed: 'Dettagliato', executive: 'Esecutivo' },
   },
   paraphrase: {
@@ -508,6 +524,9 @@ const it: Dict = {
     stepLabel: 'Riformula',
     stepDetail: 'Creata riscrittura {style}.',
     resultTitle: 'Sezioni riformulate',
+    applyToDocument:
+      'Applica la riformulazione al documento, sostituendo il contenuto (titoli e intestazioni vengono mantenuti)',
+    appliedToDocument: 'La riformulazione è stata applicata al documento.',
     styles: {
       simple: 'Semplice',
       casual: 'Informale',

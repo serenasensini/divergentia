@@ -44,7 +44,19 @@ export function useStationRunner(): StationRunner {
         showToast(doneMessage, 'success');
       } catch (err) {
         setPhase('error');
-        setMessage(err instanceof ApiError ? err.message : t('errors.generic'));
+        // The backend error message is always in English and can be highly
+        // technical (e.g. "Failed to apply text formatting: ..."), regardless
+        // of the user's chosen UI language. Rather than leaking that raw,
+        // untranslated text, always show a generic, localised error message.
+        // The original error is still logged for debugging.
+        if (err instanceof ApiError) {
+          // eslint-disable-next-line no-console
+          console.error('Station action failed:', err.status, err.message);
+        } else {
+          // eslint-disable-next-line no-console
+          console.error('Station action failed:', err);
+        }
+        setMessage(t('errors.generic'));
       }
     },
     [showToast, t],

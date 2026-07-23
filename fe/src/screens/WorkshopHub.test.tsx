@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect, type ReactNode } from 'react';
@@ -9,6 +9,7 @@ import { DocumentProvider, useDocument } from '../state/document';
 import { I18nProvider } from '../state/i18n';
 import { ToastProvider } from '../components/Toast';
 import { uploadFixture } from '../test/fixtures';
+import * as sound from '../utils/sound';
 
 function SeedDocument({ children }: { children: ReactNode }) {
   const { setDocument, documentId } = useDocument();
@@ -92,5 +93,56 @@ describe('WorkshopHub (Step 3)', () => {
     // under jsdom ("Respondable target must be a frame in the current window").
     await user.click(screen.getByRole('button', { name: /show text only/i }));
     expect(await axe(container)).toHaveNoViolations();
+  });
+
+  it('shows the diamond step tracker and plays a chime when gameTheme + soundEffects are on', async () => {
+    localStorage.setItem(
+      'divergentia.preferences.v1',
+      JSON.stringify({ gameTheme: true, soundEffects: true }),
+    );
+    const chimeSpy = vi
+      .spyOn(sound, 'playSuccessChime')
+      .mockImplementation(() => {});
+    const user = userEvent.setup();
+    renderHub();
+    await screen.findByText(uploadFixture.original_filename);
+
+    // The diamond tracker renders one entry per station.
+    expect(
+      screen.getByRole('list', { name: /applied so far/i }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Colour & style/i }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(
+      within(dialog).getByRole('button', { name: /Apply colours/i }),
+    );
+    await screen.findByText(/Colours applied/i);
+
+    expect(chimeSpy).toHaveBeenCalledOnce();
+    chimeSpy.mockRestore();
+  });
+
+  it('does not play a chime when soundEffects is off, even with gameTheme on', async () => {
+    localStorage.setItem(
+      'divergentia.preferences.v1',
+      JSON.stringify({ gameTheme: true, soundEffects: false }),
+    );
+    const chimeSpy = vi
+      .spyOn(sound, 'playSuccessChime')
+      .mockImplementation(() => {});
+    const user = userEvent.setup();
+    renderHub();
+    await screen.findByText(uploadFixture.original_filename);
+
+    await user.click(screen.getByRole('button', { name: /Colour & style/i }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(
+      within(dialog).getByRole('button', { name: /Apply colours/i }),
+    );
+    await screen.findByText(/Colours applied/i);
+
+    expect(chimeSpy).not.toHaveBeenCalled();
+    chimeSpy.mockRestore();
   });
 });

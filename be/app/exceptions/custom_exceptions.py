@@ -21,7 +21,13 @@ class ApplicationException(Exception):
             status_code: HTTP status code
             payload: Additional error information
         """
-        super().__init__()
+        # Forward the message to the base Exception so that str(exc) / repr(exc)
+        # return the real text. Previously super().__init__() was called with no
+        # arguments, which left `args` empty: any code doing f"...{str(e)}" to
+        # wrap/re-raise this exception (as formatting_service.py does) silently
+        # lost the original error detail, surfacing contentless messages like
+        # "Failed to apply text formatting: " to the client.
+        super().__init__(message)
         self.message = message
         self.status_code = status_code
         self.payload = payload or {}
