@@ -173,5 +173,160 @@ Verified: `tsc --noEmit` clean, full FE test suite green (38 tests), and the
 frontend image rebuilt + redeployed via `podman compose build web` /
 `podman compose up -d --force-recreate web`.
 
+---
+
+5. FE — WorkshopHub: applied steps list (accessibility & UX)
+
+**Status:** To be done.
+
+Check the applied steps list in the WorkshopHub for accessibility and UX improvements. Ensure that the list is easily navigable, readable, and provides clear feedback to users about their progress. Consider implementing ARIA roles and properties to enhance screen reader support, and review the visual design for clarity and contrast.
+
+---
+
+6. FE — WorkshopHub: station card interactions (accessibility & UX)
+
+**Status:** To be done.
+
+Check the station card interactions in the WorkshopHub for accessibility and UX improvements. Ensure that the cards are easily navigable, readable, and provide clear feedback to users about their actions. Consider implementing ARIA roles and properties to enhance screen reader support, and review the visual design for clarity and contrast.
+
+--- 
+
+7. FE - Complete translation coverage (i18n)
+
+**Status:** To be done.
+
+Ensure that all user-facing text in the application is covered by the internationalization (i18n) framework. Review the codebase for any hardcoded strings and replace them with appropriate i18n keys. Verify that translations are available for all supported languages and that the application correctly displays the translated text based on user preferences or browser settings.
+
+As an example, the characters of Lumi, Pip and so on, have only an English description. 
+
+---
+
+8. FE - Explain first-time options with tooltips or a guided tour
+
+**Status:** To be done.
+
+Check the first-time options in the application and provide explanations through tooltips or a guided tour. Ensure that users understand the available options and how to use them effectively. Consider implementing ARIA roles and properties to enhance screen reader support, and review the visual design for clarity and contrast.
+
+As example, the reading fonts are not explained, and the user may not understand the difference between the options.
+
+---
+
+9. FE - Add a "Reset to defaults" button for preferences
+
+**Status:** To be done.
+
+Add a "Reset to defaults" button in the preferences section of the application. This button should allow users to easily revert their settings back to the default configuration. Ensure that the button is clearly labeled and accessible, and provide a confirmation prompt to prevent accidental resets.
+
+---
+
+10. BE - Check for PDF upload support
+
+**Status:** Done (GitHub issue #6).
+
+PDF uploads are accepted and converted to DOCX on upload via **PyMuPDF**
+(`be/app/utils/document_converter.py`): the text is extracted and rebuilt into
+real, editable paragraphs so all `python-docx`-based formatting features work.
+Image-only/scanned PDFs (no extractable text) are rejected with a clear message
+(no OCR). Covered by `be/tests/unit/test_document_converter.py`.
+
+> Implementation note: converting PDFs via LibreOffice produced a DOCX full of
+> Draw-style text boxes from which `python-docx` reads 0 paragraphs, so PyMuPDF
+> is used for PDF instead of LibreOffice.
+
+---
+
+11. BE - Check for DOC upload support
+
+**Status:** Done (GitHub issue #7).
+
+DOC uploads are accepted and converted to DOCX on upload via **LibreOffice
+headless** (`soffice --headless --convert-to docx`) for high structural
+fidelity on legacy binary `.doc` files (`be/app/utils/document_converter.py`).
+The Dockerfile installs `libreoffice-writer` + `fonts-liberation`; the
+conversion binary/timeout are configurable via `LIBREOFFICE_BIN` /
+`DOC_CONVERSION_TIMEOUT`. Covered by `be/tests/unit/test_document_converter.py`.
+
+---
+
+12. BE - Remove any RTF upload support
+
+**Status:** Done (GitHub issue #8).
+
+RTF support has been removed end-to-end: dropped from `ALLOWED_EXTENSIONS`
+(`be/app/config.py`, `.env.example`), from the mime map
+(`be/app/utils/file_handler.py`) and from text extraction
+(`be/app/utils/text_extractor.py`). Bruno docs and the FE fixture
+(`fe/src/test/fixtures.ts`) were updated so the supported formats are now
+`['pdf', 'docx', 'doc', 'txt']`. RTF uploads are no longer accepted.
+
+---
+
+13. BE - Check for security vulnerabilities in file upload handling
+
+**Status:** To be done.
+
+Check the backend for any security vulnerabilities related to file upload handling. Ensure that proper validation, sanitization, and access controls are in place to prevent malicious files from being uploaded. Test the file upload functionality for common security issues such as file type validation, file size limits, and protection against directory traversal attacks.
+
+---
+
+14. BE - Implement file type validation for uploads
+
+**Status:** To be done.
+
+Implement file type validation for uploads in the backend. Ensure that only supported file types (e.g., DOCX, PDF) are accepted and that any unsupported file types are rejected with an appropriate error message. Test the file upload functionality to confirm that the validation works as expected and that users receive clear feedback when attempting to upload unsupported file types.
+
+---
+
+15. BE - Implement file size limits for uploads
+
+**Status:** To be done.
+
+Implement file size limits for uploads in the backend. Ensure that users are informed of the maximum allowed file size and that any files exceeding this limit are rejected with an appropriate error message. Test the file upload functionality to confirm that the size limit is enforced correctly and that users receive clear feedback when attempting to upload files that are too large.
+
+---
+
+16. BE - Check for logging levels and sensitive information exposure
+
+**Status:** To be done.
+
+Check the backend logging levels and ensure that sensitive information is not exposed in logs. Review the logging configuration to ensure that only necessary information is logged and that sensitive data (e.g., user credentials, personal information) is not included in log entries. Test the application to confirm that logs are appropriately configured and that sensitive information is protected. Allow changing the level of logging (e.g., debug, info, warning, error) via configuration or environment variables, and ensure that sensitive information is never logged at any level.
 
 
+17. BE - Framing options should be translated
+
+**Status:** To be done.
+
+Ensure that the framing options in the backend are translated and available in all supported languages. Review the codebase for any hardcoded strings related to framing options and replace them with appropriate i18n keys. Verify that translations are available for all supported languages and that the application correctly displays the translated text based on user preferences or browser settings. 
+
+As an example, now we've got "single", "double", "dashed" and so on for the border style, but they are not translated.
+
+18. BE - Lists should be framed in a single box as a single unit, not as single rows
+
+**Status:** To be done.
+
+Ensure that lists in the backend are framed as a single box, rather than framing each list item individually. Review the codebase for any logic related to framing lists and update it to treat the entire list as a single unit. Test the application to confirm that lists are correctly framed as a single box and that the visual representation is consistent with the intended design.
+
+
+---
+
+19. BE - Check for performance issues with large documents
+
+**Status:** To be done.
+
+Check the backend for any performance issues when processing large documents. Test the application with various document sizes and formats to identify any bottlenecks or slowdowns in processing. Optimize the backend logic as needed to improve performance and ensure that large documents are handled efficiently without causing timeouts or excessive resource usage.
+
+---
+
+20. BE - Allow exporting the processed document in multiple formats (e.g., DOCX, PDF)
+
+**Status:** To be done.
+
+Allow users to export the processed document in multiple formats, such as DOCX and PDF. Implement the necessary backend logic to convert the processed document into the desired format and provide a download link for users. Test the export functionality to confirm that documents are correctly generated in the selected format and that users can successfully download them.
+
+--- 
+
+21. FE - Convert the "Mostra solo testo" feature in a reading mode, with a toggle button to switch between reading and editing mode
+
+**Status:** To be done.
+
+Emulating what Firefox does natively as browser on pages, this feature will allow users to switch between a reading mode, where only the text is displayed, and an editing mode, where the full document can be edited. Implement a toggle button to switch between these modes and ensure that the application correctly updates the display based on the selected mode. Test the feature to confirm that it works as expected and provides a seamless reading and editing experience.
