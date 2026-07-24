@@ -219,6 +219,14 @@ theme, text size, reduce-motion, classic mode, game theme and sound effects each
 get a `welcome.help.*` explanation (EN + IT). No tour animation was added, so
 `prefers-reduced-motion` is unaffected. Covered by a new tooltip test.
 
+**Follow-up fix:** the reading-font preference was correctly wired
+(`<html data-font>` → `--font-active` → `body`) but the Atkinson Hyperlegible
+and OpenDyslexic families were never loaded, so selecting them silently fell
+back to the system font. Both are now self-hosted under `fe/public/fonts/`
+(`.woff2`, OFL) with `@font-face` rules (Regular/Bold/Italic/BoldItalic,
+`font-display: swap`) in `global.css`, so the choice now visibly changes the
+rendering — offline, no third-party requests. See `fe/public/fonts/NOTICE.md`.
+
 ---
 
 9. FE - Add a "Reset to defaults" button for preferences
