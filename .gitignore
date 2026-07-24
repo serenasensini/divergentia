@@ -40,3 +40,15 @@ testem.log
 # System files
 .DS_Store
 Thumbs.db
+# Python bytecode (applies repo-wide, e.g. be/)
+__pycache__/
+*.py[cod]
+*$py.class
+# Python virtual environments
+myvenv/
+venv/
+.venv/
+# Tooling / editor / local caches
+.tokensave/
+.ai/
+.idea/
