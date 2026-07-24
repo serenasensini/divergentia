@@ -10,7 +10,8 @@ from app import limiter
 from app.services.document_service import get_document_service
 from app.services.ollama_service import get_ollama_service
 from app.services.formatting_service import get_formatting_service
-from app.utils.file_handler import validate_file, save_uploaded_file, detect_mime_type, get_file_size
+from app.utils.file_handler import validate_file, save_uploaded_file, detect_mime_type, get_file_size, delete_file
+from app.utils.document_converter import needs_conversion, convert_to_docx
 from app.utils.validators import (
     validate_schema,
     validate_document_id,
@@ -136,6 +137,25 @@ def upload_document():
     # Save file
     upload_folder = current_app.config['UPLOAD_FOLDER']
     file_path, original_filename = save_uploaded_file(file, upload_folder)
+
+    # Legacy DOC and PDF uploads are not directly editable by the DOCX-based
+    # pipeline: convert them to DOCX up front so every downstream operation
+    # works on a uniform DOCX working file. The user-facing filename keeps the
+    # original stem but reflects the new .docx format.
+    from pathlib import Path as _Path
+    source_extension = _Path(original_filename).suffix.lower().lstrip('.')
+    if needs_conversion(source_extension):
+        try:
+            docx_path = convert_to_docx(file_path, upload_folder)
+        except Exception:
+            # Clean up the unusable source before surfacing the error.
+            delete_file(file_path)
+            raise
+        # The original DOC/PDF is no longer needed once converted.
+        delete_file(file_path)
+        file_path = docx_path
+        original_filename = f"{_Path(original_filename).stem}.docx"
+        file_size = get_file_size(file_path)
 
     # Detect MIME type
     mime_type = detect_mime_type(file_path)

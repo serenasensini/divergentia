@@ -42,10 +42,17 @@ class Config:
     OLLAMA_MAX_RETRIES = int(os.getenv('OLLAMA_MAX_RETRIES', 3))
 
     # File Upload Configuration
+    # RTF is intentionally excluded: it cannot be edited by the DOCX-based
+    # processing pipeline. Legacy DOC and PDF uploads are transparently
+    # converted to DOCX at upload time (see app/utils/document_converter.py).
     MAX_UPLOAD_SIZE = int(os.getenv('MAX_UPLOAD_SIZE', 10485760))  # 10MB default
-    ALLOWED_EXTENSIONS = set(os.getenv('ALLOWED_EXTENSIONS', 'pdf,docx,doc,txt,rtf').split(','))
+    ALLOWED_EXTENSIONS = set(os.getenv('ALLOWED_EXTENSIONS', 'pdf,docx,doc,txt').split(','))
     UPLOAD_FOLDER = _resolve_path(os.getenv('UPLOAD_FOLDER', 'uploads'))
     OUTPUT_FOLDER = _resolve_path(os.getenv('OUTPUT_FOLDER', 'outputs'))
+
+    # Document Conversion (DOC/PDF -> DOCX via headless LibreOffice)
+    LIBREOFFICE_BIN = os.getenv('LIBREOFFICE_BIN', 'soffice')
+    DOC_CONVERSION_TIMEOUT = int(os.getenv('DOC_CONVERSION_TIMEOUT', 120))
 
     # Rate Limiting
     RATE_LIMIT_ENABLED = os.getenv('RATE_LIMIT_ENABLED', 'True').lower() == 'true'

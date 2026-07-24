@@ -154,8 +154,7 @@ def detect_mime_type(file_path: str) -> str:
             '.pdf': 'application/pdf',
             '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             '.doc': 'application/msword',
-            '.txt': 'text/plain',
-            '.rtf': 'application/rtf'
+            '.txt': 'text/plain'
         }
         return mime_map.get(extension, 'application/octet-stream')
 

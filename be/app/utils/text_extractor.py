@@ -36,7 +36,7 @@ def extract_text_from_file(file_path: str) -> str:
             return extract_text_from_docx(file_path)
         elif file_extension == 'pdf':
             return extract_text_from_pdf(file_path)
-        elif file_extension in ['txt', 'rtf']:
+        elif file_extension == 'txt':
             return extract_text_from_txt(file_path)
         else:
             raise FileProcessingException(
@@ -124,7 +124,7 @@ def extract_text_from_pdf(file_path: str) -> str:
 
 def extract_text_from_txt(file_path: str) -> str:
     """
-    Extract text from TXT/RTF file.
+    Extract text from TXT file.
 
     Args:
         file_path: Path to text file

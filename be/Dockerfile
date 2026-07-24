@@ -1,10 +1,15 @@
 # Lightweight image for the single-shot, local Divergentia API.
 FROM docker.io/library/python:3.11-slim
 
-# System deps: libmagic for file-type detection, build tools for wheels that
-# need compiling (removed afterwards to keep the image small).
+# System deps:
+#  - libmagic1: file-type detection
+#  - libreoffice-writer: headless legacy DOC -> DOCX conversion
+#    (PDF -> DOCX is handled in-process by PyMuPDF, so Draw is not needed)
+#  - fonts-liberation: sane default fonts for the converted documents
+#  - build tools for wheels that need compiling (removed afterwards).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc g++ libmagic1 \
+        libreoffice-writer fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

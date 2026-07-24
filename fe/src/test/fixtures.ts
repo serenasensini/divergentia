@@ -16,7 +16,7 @@ export const healthFixture: HealthResponse = {
 };
 
 export const formatsFixture: SupportedFormatsResponse = {
-  supported_formats: ['pdf', 'docx', 'doc', 'txt', 'rtf'],
+  supported_formats: ['pdf', 'docx', 'doc', 'txt'],
   format_details: {
     txt: { format: 'txt', option_details: {} },
   },
