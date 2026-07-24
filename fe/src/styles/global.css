@@ -250,6 +250,37 @@ html[data-game-theme='true'] .button--primary::before {
 .welcome__intro { color: var(--ink-soft); }
 .welcome__section { margin-top: 2rem; }
 .welcome__enter { margin-top: 2rem; width: 100%; font-size: 1.05rem; }
+.welcome__reset { margin-top: 1.5rem; }
+
+/* Confirmation dialog (e.g. reset to defaults) */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.45);
+}
+.modal {
+  width: min(440px, 100%);
+  padding: 1.5rem;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+.modal__title { margin-top: 0; }
+.modal__body { color: var(--ink-soft); }
+.modal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 1.5rem;
+}
 
 .character-grid {
   border: 0;

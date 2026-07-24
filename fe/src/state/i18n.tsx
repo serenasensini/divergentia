@@ -46,11 +46,41 @@ const en = {
     reduceMotion: 'Reduce motion and animation',
     classicMode: 'Classic mode (plain layout, no game scene)',
     gameTheme: 'Playful diamond theme (Sims-style step markers and colours)',
+    soundEffects:
+      'Play a soft sound when you complete a stage (diamond theme)',
     enter: 'Enter the workshop',
+    moreInfo: 'More information',
+    reset: 'Reset to defaults',
+    resetConfirmTitle: 'Reset all preferences?',
+    resetConfirmBody:
+      'This restores every setting — companion, font, theme, text size and toggles — to its original value. This cannot be undone.',
+    resetConfirm: 'Yes, reset',
+    resetCancel: 'Cancel',
+    resetDone: 'Preferences have been reset to their defaults.',
+    help: {
+      font: 'How letters are shaped on screen. Pick whichever is most comfortable to read.',
+      theme: 'The overall colour mood of the interface.',
+      textSize: 'How large the text appears throughout the app.',
+      reduceMotion:
+        'Removes animations and movement for a calmer, more predictable interface.',
+      classicMode:
+        'Swaps the illustrated scene for a plain, list-based layout with less visual detail.',
+      gameTheme:
+        'A cosmetic, Sims-inspired skin: diamond step markers and brighter accent colours. It never changes your font, theme, text size or motion settings.',
+      soundEffects:
+        'Plays a gentle two-note chime when you finish a stage. Only available with the diamond theme, and off unless you turn it on.',
+    },
     fonts: {
       system: 'Default',
       atkinson: 'Atkinson Hyperlegible',
       dyslexic: 'OpenDyslexic-style',
+    },
+    fontDesc: {
+      system: 'Your device’s standard font — familiar and fast to load.',
+      atkinson:
+        'A typeface designed for low vision, with letters that are easy to tell apart.',
+      dyslexic:
+        'Weighted, distinct letter shapes that many dyslexic readers find easier to follow.',
     },
     themes: {
       calm: 'Calm (light)',
@@ -63,6 +93,18 @@ const en = {
       large: 'Large',
       'x-large': 'Extra large',
     },
+  },
+  characters: {
+    lumi: { blurb: 'A calm owl who reads slowly and never rushes you.' },
+    pip: { blurb: 'A tidy fox who loves sorting and structuring documents.' },
+    nova: {
+      blurb: 'A steady turtle who keeps everything one clear step at a time.',
+    },
+    ember: { blurb: 'A gentle dragon who highlights and colours with care.' },
+  },
+  notifications: {
+    region: 'Notifications',
+    dismiss: 'Dismiss notification',
   },
   upload: {
     title: 'Bring in a document',
@@ -206,6 +248,7 @@ const en = {
     perSection: 'Keywords per section (1–10)',
     includeNames: 'Include names & places',
     model: 'AI model (optional)',
+    modelPlaceholder: 'e.g. llama3.2',
     apply: 'Add keywords',
     working: 'Finding keywords…',
     done: 'Keywords added above each section.',
@@ -313,10 +356,39 @@ const it: Dict = {
     soundEffects:
       'Riproduci un lieve suono quando completi una tappa (tema diamante)',
     enter: 'Entra nel laboratorio',
+    moreInfo: 'Maggiori informazioni',
+    reset: 'Ripristina i valori predefiniti',
+    resetConfirmTitle: 'Ripristinare tutte le preferenze?',
+    resetConfirmBody:
+      'Ripristina ogni impostazione — compagno, carattere, tema, dimensione del testo e interruttori — al valore originale. L’operazione non può essere annullata.',
+    resetConfirm: 'Sì, ripristina',
+    resetCancel: 'Annulla',
+    resetDone: 'Le preferenze sono state ripristinate ai valori predefiniti.',
+    help: {
+      font: 'Come sono disegnate le lettere sullo schermo. Scegli quello più comodo da leggere per te.',
+      theme: 'L’atmosfera cromatica generale dell’interfaccia.',
+      textSize: 'Quanto appare grande il testo in tutta l’applicazione.',
+      reduceMotion:
+        'Rimuove animazioni e movimenti per un’interfaccia più calma e prevedibile.',
+      classicMode:
+        'Sostituisce la scena illustrata con un layout semplice, a elenco, con meno dettagli visivi.',
+      gameTheme:
+        'Una veste estetica ispirata a The Sims: indicatori di passo a diamante e colori d’accento più vivaci. Non modifica mai carattere, tema, dimensione del testo o impostazioni di movimento.',
+      soundEffects:
+        'Riproduce un lieve suono di due note quando completi una tappa. Disponibile solo con il tema diamante e disattivato finché non lo attivi.',
+    },
     fonts: {
       system: 'Predefinito',
       atkinson: 'Atkinson Hyperlegible',
       dyslexic: 'Stile OpenDyslexic',
+    },
+    fontDesc: {
+      system:
+        'Il carattere standard del tuo dispositivo — familiare e veloce da caricare.',
+      atkinson:
+        'Un carattere progettato per l’ipovisione, con lettere facili da distinguere.',
+      dyslexic:
+        'Forme delle lettere marcate e distinte, che molti lettori dislessici trovano più facili da seguire.',
     },
     themes: {
       calm: 'Tenue (chiaro)',
@@ -329,6 +401,18 @@ const it: Dict = {
       large: 'Grande',
       'x-large': 'Molto grande',
     },
+  },
+  characters: {
+    lumi: { blurb: 'Un gufo tranquillo che legge con calma e non ti mette mai fretta.' },
+    pip: { blurb: 'Una volpe ordinata che adora ordinare e strutturare i documenti.' },
+    nova: {
+      blurb: 'Una tartaruga costante che procede sempre un passo chiaro alla volta.',
+    },
+    ember: { blurb: 'Un drago gentile che evidenzia e colora con cura.' },
+  },
+  notifications: {
+    region: 'Notifiche',
+    dismiss: 'Chiudi notifica',
   },
   upload: {
     title: 'Porta un documento',
@@ -473,6 +557,7 @@ const it: Dict = {
     perSection: 'Parole chiave per sezione (1–10)',
     includeNames: 'Includi nomi e luoghi',
     model: 'Modello AI (opzionale)',
+    modelPlaceholder: 'es. llama3.2',
     apply: 'Aggiungi parole chiave',
     working: 'Sto cercando le parole chiave…',
     done: 'Parole chiave aggiunte sopra ogni sezione.',

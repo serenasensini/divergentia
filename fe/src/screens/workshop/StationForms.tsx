@@ -416,7 +416,7 @@ export function KeywordsStation({ documentId, onApplied }: StationProps) {
         <input
           id="kw-model"
           type="text"
-          placeholder="e.g. llama3.2"
+          placeholder={t('keywords.modelPlaceholder')}
           value={model}
           onChange={(e) => setModel(e.target.value)}
         />

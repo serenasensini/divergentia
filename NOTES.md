@@ -193,29 +193,45 @@ Check the station card interactions in the WorkshopHub for accessibility and UX 
 
 7. FE - Complete translation coverage (i18n)
 
-**Status:** To be done.
+**Status:** Done (GitHub issue #3).
 
-Ensure that all user-facing text in the application is covered by the internationalization (i18n) framework. Review the codebase for any hardcoded strings and replace them with appropriate i18n keys. Verify that translations are available for all supported languages and that the application correctly displays the translated text based on user preferences or browser settings.
-
-As an example, the characters of Lumi, Pip and so on, have only an English description. 
+Character descriptions (Lumi, Pip, Nova, Ember) are no longer hardcoded: the
+`blurb` was removed from `fe/src/state/characters.ts` and moved to i18n under
+`characters.<id>.blurb` (EN + IT), resolved at render time in
+`WelcomeScreen.tsx`. Other hardcoded strings found in an audit were also moved
+to i18n: the Toast region/dismiss `aria-label`s (`notifications.*` in
+`Toast.tsx`) and the keyword-model placeholder (`keywords.modelPlaceholder` in
+`StationForms.tsx`). A missing EN `welcome.soundEffects` key was added so the
+EN locale no longer falls back to the raw key path. `tsc --noEmit` clean and the
+FE suite (41 tests) is green.
 
 ---
 
 8. FE - Explain first-time options with tooltips or a guided tour
 
-**Status:** To be done.
+**Status:** Done (GitHub issue #4).
 
-Check the first-time options in the application and provide explanations through tooltips or a guided tour. Ensure that users understand the available options and how to use them effectively. Consider implementing ARIA roles and properties to enhance screen reader support, and review the visual design for clarity and contrast.
-
-As example, the reading fonts are not explained, and the user may not understand the difference between the options.
+Each first-time preference in `WelcomeScreen.tsx` now has an accessible help
+tooltip via the existing `<Tooltip>` component (focus/hover reachable,
+`aria-describedby`, Esc-dismissible). The reading-font tooltip lists every font
+option with a short description (`welcome.help.font` + `welcome.fontDesc.*`);
+theme, text size, reduce-motion, classic mode, game theme and sound effects each
+get a `welcome.help.*` explanation (EN + IT). No tour animation was added, so
+`prefers-reduced-motion` is unaffected. Covered by a new tooltip test.
 
 ---
 
 9. FE - Add a "Reset to defaults" button for preferences
 
-**Status:** To be done.
+**Status:** Done (GitHub issue #5).
 
-Add a "Reset to defaults" button in the preferences section of the application. This button should allow users to easily revert their settings back to the default configuration. Ensure that the button is clearly labeled and accessible, and provide a confirmation prompt to prevent accidental resets.
+A clearly-labelled "Reset to defaults" button in the Welcome/preferences setup
+section (`WelcomeScreen.tsx`) opens an accessible confirmation dialog
+(`role="alertdialog"`, `aria-modal`, labelled/described, focus moved to the
+confirm button, Esc/overlay-click to cancel) before calling the existing
+`reset()` from `preferences.tsx`. A polite `role="status"` live region announces
+completion. New i18n keys `welcome.reset*` (EN + IT). Covered by new tests for
+the confirm and cancel flows.
 
 ---
 

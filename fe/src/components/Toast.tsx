@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { useI18n } from '../state/i18n';
 
 export type ToastVariant = 'success' | 'error' | 'info';
 
@@ -33,6 +34,7 @@ const TOAST_DURATION_MS = 5000;
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const counter = useRef(0);
+  const { t } = useI18n();
 
   const dismiss = useCallback((id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -52,7 +54,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="toast-region" role="region" aria-label="Notifications">
+      <div className="toast-region" role="region" aria-label={t('notifications.region')}>
         <ol className="toast-stack" aria-live="polite" aria-atomic="false">
           {toasts.map((toast) => (
             <li
@@ -64,7 +66,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               <button
                 type="button"
                 className="toast__close"
-                aria-label="Dismiss notification"
+                aria-label={t('notifications.dismiss')}
                 onClick={() => dismiss(toast.id)}
               >
                 ✕

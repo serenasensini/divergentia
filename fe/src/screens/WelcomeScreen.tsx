@@ -1,3 +1,4 @@
+import { useEffect, useId, useRef, useState } from 'react';
 import { CHARACTERS } from '../state/characters';
 import {
   usePreferences,
@@ -8,6 +9,7 @@ import {
 import { useI18n } from '../state/i18n';
 import { LanguageSelector } from '../components/LanguageSelector';
 import { Plumbob } from '../components/Plumbob';
+import { Tooltip } from '../components/Tooltip';
 
 interface WelcomeScreenProps {
   onEnter: () => void;
@@ -23,8 +25,41 @@ const TEXT_SIZE_OPTIONS: TextSize[] = ['small', 'medium', 'large', 'x-large'];
  * Everything is real DOM: keyboard-operable, screen-reader friendly.
  */
 export function WelcomeScreen({ onEnter }: WelcomeScreenProps) {
-  const { preferences, setPreference } = usePreferences();
+  const { preferences, setPreference, reset } = usePreferences();
   const { t } = useI18n();
+
+  // "Reset to defaults" confirmation flow (issue #5).
+  const [confirmingReset, setConfirmingReset] = useState(false);
+  const [resetAnnouncement, setResetAnnouncement] = useState('');
+  const resetButtonRef = useRef<HTMLButtonElement>(null);
+  const confirmButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogTitleId = useId();
+  const dialogBodyId = useId();
+
+  // Move focus into the dialog when it opens for keyboard/SR users.
+  useEffect(() => {
+    if (confirmingReset) confirmButtonRef.current?.focus();
+  }, [confirmingReset]);
+
+  const closeConfirm = () => {
+    setConfirmingReset(false);
+    resetButtonRef.current?.focus();
+  };
+
+  const handleReset = () => {
+    reset();
+    setConfirmingReset(false);
+    setResetAnnouncement(t('welcome.resetDone'));
+    resetButtonRef.current?.focus();
+  };
+
+  /** A small accessible "?" help tooltip for a first-time option (issue #4). */
+  const help = (key: string) => (
+    <Tooltip
+      label={`${t('welcome.moreInfo')}: ${t(`welcome.${key}`)}`}
+      content={t(`welcome.help.${key}`)}
+    />
+  );
 
   return (
     <main className="welcome" aria-labelledby="welcome-title">
@@ -63,7 +98,7 @@ export function WelcomeScreen({ onEnter }: WelcomeScreenProps) {
                   </span>
                   <span className="character-card__name">{character.name}</span>
                   <span className="character-card__blurb">
-                    {character.blurb}
+                    {t(`characters.${character.id}.blurb`)}
                   </span>
                 </label>
               );
@@ -77,7 +112,25 @@ export function WelcomeScreen({ onEnter }: WelcomeScreenProps) {
           <LanguageSelector id="welcome-language" />
 
           <div className="field">
-            <label htmlFor="font-select">{t('welcome.readingFont')}</label>
+            <label htmlFor="font-select" className="field__label-row">
+              {t('welcome.readingFont')}
+              <Tooltip
+                label={`${t('welcome.moreInfo')}: ${t('welcome.readingFont')}`}
+                content={
+                  <>
+                    <strong>{t('welcome.help.font')}</strong>
+                    <ul className="tooltip__list">
+                      {FONT_OPTIONS.map((o) => (
+                        <li key={o}>
+                          <strong>{t(`welcome.fonts.${o}`)}</strong> —{' '}
+                          {t(`welcome.fontDesc.${o}`)}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                }
+              />
+            </label>
             <select
               id="font-select"
               value={preferences.font}
@@ -94,7 +147,10 @@ export function WelcomeScreen({ onEnter }: WelcomeScreenProps) {
           </div>
 
           <div className="field">
-            <label htmlFor="theme-select">{t('welcome.colourTheme')}</label>
+            <label htmlFor="theme-select" className="field__label-row">
+              {t('welcome.colourTheme')}
+              {help('theme')}
+            </label>
             <select
               id="theme-select"
               value={preferences.theme}
@@ -111,7 +167,10 @@ export function WelcomeScreen({ onEnter }: WelcomeScreenProps) {
           </div>
 
           <div className="field">
-            <label htmlFor="text-size-select">{t('welcome.textSize')}</label>
+            <label htmlFor="text-size-select" className="field__label-row">
+              {t('welcome.textSize')}
+              {help('textSize')}
+            </label>
             <select
               id="text-size-select"
               value={preferences.textSize}
@@ -135,6 +194,7 @@ export function WelcomeScreen({ onEnter }: WelcomeScreenProps) {
               onChange={(e) => setPreference('reduceMotion', e.target.checked)}
             />
             <label htmlFor="reduce-motion">{t('welcome.reduceMotion')}</label>
+            {help('reduceMotion')}
           </div>
 
           <div className="field field--switch">
@@ -145,6 +205,7 @@ export function WelcomeScreen({ onEnter }: WelcomeScreenProps) {
               onChange={(e) => setPreference('classicMode', e.target.checked)}
             />
             <label htmlFor="classic-mode">{t('welcome.classicMode')}</label>
+            {help('classicMode')}
           </div>
 
           <div className="field field--switch">
@@ -155,6 +216,7 @@ export function WelcomeScreen({ onEnter }: WelcomeScreenProps) {
               onChange={(e) => setPreference('gameTheme', e.target.checked)}
             />
             <label htmlFor="game-theme">{t('welcome.gameTheme')}</label>
+            {help('gameTheme')}
           </div>
 
           {preferences.gameTheme && (
@@ -170,8 +232,20 @@ export function WelcomeScreen({ onEnter }: WelcomeScreenProps) {
               <label htmlFor="sound-effects">
                 {t('welcome.soundEffects')}
               </label>
+              {help('soundEffects')}
             </div>
           )}
+
+          <div className="welcome__reset">
+            <button
+              type="button"
+              ref={resetButtonRef}
+              className="button button--ghost"
+              onClick={() => setConfirmingReset(true)}
+            >
+              {t('welcome.reset')}
+            </button>
+          </div>
         </section>
 
         <button
@@ -184,6 +258,54 @@ export function WelcomeScreen({ onEnter }: WelcomeScreenProps) {
         >
           {t('welcome.enter')}
         </button>
+      </div>
+
+      {confirmingReset && (
+        <div
+          className="modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeConfirm();
+          }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby={dialogTitleId}
+            aria-describedby={dialogBodyId}
+            className="modal"
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') closeConfirm();
+            }}
+          >
+            <h2 id={dialogTitleId} className="modal__title">
+              {t('welcome.resetConfirmTitle')}
+            </h2>
+            <p id={dialogBodyId} className="modal__body">
+              {t('welcome.resetConfirmBody')}
+            </p>
+            <div className="modal__actions">
+              <button
+                type="button"
+                className="button button--ghost"
+                onClick={closeConfirm}
+              >
+                {t('welcome.resetCancel')}
+              </button>
+              <button
+                type="button"
+                ref={confirmButtonRef}
+                className="button button--primary"
+                onClick={handleReset}
+              >
+                {t('welcome.resetConfirm')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="visually-hidden" role="status" aria-live="polite">
+        {resetAnnouncement}
       </div>
     </main>
   );
