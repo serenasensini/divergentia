@@ -34,9 +34,9 @@ const en = {
     it: 'Italiano',
   },
   welcome: {
-    title: 'Welcome to your Document Workshop',
+    title: 'Welcome to DivergentIA',
     intro:
-      'A calm, one-step-at-a-time place to reshape documents so they are easier to read. First, choose a companion and set things up your way. You can change any of this later.',
+      'A calm place where, one step at a time, you can reshape documents and make them more adaptable. First, choose a companion and set things up your way. You can change any of this later.',
     chooseCompanion: 'Choose your companion',
     companionLegend: 'Assistant companion',
     setup: 'Set things up your way',
@@ -298,9 +298,9 @@ const it: Dict = {
     it: 'Italiano',
   },
   welcome: {
-    title: 'Benvenuto nel tuo Laboratorio Documenti',
+    title: 'Benvenuto/a in DivergentIA',
     intro:
-      'Un luogo tranquillo, un passo alla volta, per rimodellare i documenti e renderli più facili da leggere. Prima scegli un compagno e imposta tutto come preferisci. Potrai cambiare ogni cosa in seguito.',
+      'Un luogo tranquillo dove, un passo alla volta, puoi dare forma ai documenti e renderli più adattivi. Prima scegli un compagno e imposta tutto come preferisci. Potrai cambiare ogni cosa in seguito.',
     chooseCompanion: 'Scegli il tuo compagno',
     companionLegend: 'Compagno assistente',
     setup: 'Imposta tutto come preferisci',
