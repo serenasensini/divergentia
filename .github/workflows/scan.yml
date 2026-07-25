@@ -1,0 +1,140 @@
+name: Docker Scout - Analisi Immagini
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+
+jobs:
+  build-and-scan:
+    name: Build & Scan (${{ matrix.component.name }})
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - name: backend
+            context: ./be
+            dockerfile: ./be/Dockerfile
+            image: divergentia-be:${{ github.run_id }}
+          - name: frontend
+            context: ./fe
+            dockerfile: ./fe/Dockerfile
+            image: divergentia-fe:${{ github.run_id }}
+
+    steps:
+      - name: Checkout del codice
+        uses: actions/checkout@v4
+
+      # ─── BUILD ────────────────────────────────────────────────────────────────
+      - name: Build dell'immagine Docker (${{ matrix.component.name }})
+        run: |
+          docker build "${{ matrix.component.context }}" \
+            --file "${{ matrix.component.dockerfile }}" \
+            --tag "${{ matrix.component.image }}"
+
+      # ─── SCOUT — solo su PR ──────────────────────────────────────────────────
+      - name: Installazione Docker Scout CLI
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/docker/scout-cli/main/install.sh \
+            -o install-scout.sh
+          sh install-scout.sh
+
+      - name: Autenticazione Docker Scout
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login \
+            --username "${{ secrets.DOCKERHUB_USER }}" \
+            --password-stdin
+
+      - name: Scansione vulnerabilità con Docker Scout (${{ matrix.component.name }})
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          docker scout cves "${{ matrix.component.image }}" \
+            --ignore-base \
+            --format sarif \
+            --output scan-results-${{ matrix.component.name }}.sarif.json
+
+      # ─── ANALISI RISULTATI ────────────────────────────────────────────────────
+      - name: Verifica vulnerabilità (${{ matrix.component.name }})
+        id: check_vulnerabilities
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          VULN_COUNT=$(jq '.runs[0].results | length' scan-results-${{ matrix.component.name }}.sarif.json)
+          echo "Vulnerabilità trovate (${{ matrix.component.name }}): $VULN_COUNT"
+          echo "vuln_count=$VULN_COUNT" >> "$GITHUB_OUTPUT"
+
+          if [[ "$VULN_COUNT" -gt 0 ]]; then
+            echo "fail_workflow=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "fail_workflow=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commenta sulla PR con le vulnerabilità (${{ matrix.component.name }})
+        if: >
+          github.event_name == 'pull_request' &&
+          steps.check_vulnerabilities.outputs.fail_workflow == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const component = '${{ matrix.component.name }}';
+            const image = '${{ matrix.component.image }}';
+            const sarif = JSON.parse(fs.readFileSync(`scan-results-${component}.sarif.json`, 'utf8'));
+            const results = sarif.runs[0].results;
+
+            const lines = results.map(r => {
+              const level = r.level || 'unknown';
+              const ruleId = r.ruleId || 'N/A';
+              const msg = r.message?.text || 'Nessun dettaglio disponibile';
+              return `| \`${ruleId}\` | ${level} | ${msg} |`;
+            }).join('\n');
+
+            const body = [
+              `## ⚠️ Vulnerabilità trovate nell'immagine Docker (${component})`,
+              ``,
+              `Docker Scout ha rilevato **${results.length} vulnerabilità** nell'immagine \`${image}\`.`,
+              ``,
+              `| CVE / Regola | Severità | Descrizione |`,
+              `|---|---|---|`,
+              lines,
+              ``,
+              `> Le vulnerabilità elencate escludono quelle già presenti nell'immagine base (\`--ignore-base\`).`,
+              `> Risolvi i problemi e ri-pusha per aggiornare questa analisi.`
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+
+      - name: Blocca il workflow se ci sono vulnerabilità (${{ matrix.component.name }})
+        if: >
+          github.event_name == 'pull_request' &&
+          steps.check_vulnerabilities.outputs.fail_workflow == 'true'
+        run: |
+          echo "::error::Trovate ${{ steps.check_vulnerabilities.outputs.vuln_count }} vulnerabilità nell'immagine ${{ matrix.component.name }}. Il merge è bloccato."
+          exit 1
+
+      # ─── PUSH — solo su merge in main ─────────────────────────────────────────
+      # Push disabilitato per il momento: nessun registry di destinazione configurato.
+      # - name: Tag e push dell'immagine (post-merge)
+      #   if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      #   run: |
+      #     # Sostituisci REGISTRY_URL con il tuo registry (es. ghcr.io/tuonome, 123456.dkr.ecr.eu-west-1.amazonaws.com, ecc.)
+      #     echo "Pronto per il push verso ${{ secrets.REGISTRY_URL }}"
+      #     docker tag "${{ matrix.component.image }}" "${{ secrets.REGISTRY_URL }}/divergentia-${{ matrix.component.name }}:latest"
+      #     docker push "${{ secrets.REGISTRY_URL }}/divergentia-${{ matrix.component.name }}:latest"
