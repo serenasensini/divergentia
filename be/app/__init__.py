@@ -148,14 +148,22 @@ def register_error_handlers(app: Flask) -> None:
         handle_validation_error,
         handle_not_found,
         handle_internal_error,
-        handle_custom_exception
+        handle_custom_exception,
+        handle_request_entity_too_large,
+        handle_http_exception,
     )
     from app.exceptions.custom_exceptions import ApplicationException
+    from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
     app.register_error_handler(400, handle_validation_error)
     app.register_error_handler(404, handle_not_found)
+    app.register_error_handler(413, handle_request_entity_too_large)
+    app.register_error_handler(RequestEntityTooLarge, handle_request_entity_too_large)
     app.register_error_handler(500, handle_internal_error)
     app.register_error_handler(ApplicationException, handle_custom_exception)
+    # Catch-all for any other Werkzeug HTTP exception (e.g. 405, 415) so the
+    # API never falls back to an HTML error page.
+    app.register_error_handler(HTTPException, handle_http_exception)
 
     app.logger.info('Error handlers registered')
 

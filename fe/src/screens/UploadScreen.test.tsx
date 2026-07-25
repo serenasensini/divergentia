@@ -22,6 +22,33 @@ describe('UploadScreen (Step 2)', () => {
     );
   });
 
+  it('shows the maximum upload size fetched from the backend', async () => {
+    renderWithProviders(<UploadScreen />);
+    await waitFor(() =>
+      expect(screen.getByText(/Supported:/i)).toHaveTextContent(
+        /Maximum size: 10\.0 MB/i,
+      ),
+    );
+  });
+
+  it('rejects an oversized file before uploading', async () => {
+    renderWithProviders(<UploadScreen />);
+    await screen.findByText(/Supported:/i);
+
+    // formatsFixture caps uploads at 10485760 bytes (10 MB); this file is
+    // deliberately larger so the client-side size check rejects it without
+    // ever calling the upload endpoint.
+    const bigFile = new File([new Uint8Array(11 * 1024 * 1024)], 'huge.docx', {
+      type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    });
+    const input = screen.getByLabelText(/Choose a document to upload/i);
+    await userEvent.setup().upload(input, bigFile);
+
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent(/too large/i),
+    );
+  });
+
   it('uploads a supported file and reports success', async () => {
     const user = userEvent.setup();
     renderWithProviders(<UploadScreen />);

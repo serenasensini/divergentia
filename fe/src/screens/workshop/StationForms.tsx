@@ -257,7 +257,7 @@ export function FramingStation({ documentId, onApplied }: StationProps) {
         >
           {['single', 'double', 'dashed', 'dotted', 'thick'].map((s) => (
             <option key={s} value={s}>
-              {s}
+              {t(`framing.borderStyles.${s}`)}
             </option>
           ))}
         </select>

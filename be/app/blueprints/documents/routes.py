@@ -10,7 +10,14 @@ from app import limiter
 from app.services.document_service import get_document_service
 from app.services.ollama_service import get_ollama_service
 from app.services.formatting_service import get_formatting_service
-from app.utils.file_handler import validate_file, save_uploaded_file, detect_mime_type, get_file_size, delete_file
+from app.utils.file_handler import (
+    validate_file,
+    validate_file_content,
+    save_uploaded_file,
+    detect_mime_type,
+    get_file_size,
+    delete_file,
+)
 from app.utils.document_converter import needs_conversion, convert_to_docx
 from app.utils.validators import (
     validate_schema,
@@ -86,9 +93,13 @@ def get_supported_formats():
     for format_type in ['docx', 'pdf', 'txt']:
         format_details[format_type] = formatting_service.get_available_styles(format_type)
 
+    max_upload_size = current_app.config.get('MAX_UPLOAD_SIZE', 10485760)
+
     return jsonify({
         'supported_formats': list(current_app.config['ALLOWED_EXTENSIONS']),
-        'format_details': format_details
+        'format_details': format_details,
+        'max_upload_size_bytes': max_upload_size,
+        'max_upload_size_mb': round(max_upload_size / (1024 * 1024), 1),
     }), 200
 
 
@@ -133,6 +144,15 @@ def upload_document():
     is_valid, error_message = validate_file(file.filename, file_size)
     if not is_valid:
         raise FileUploadException(error_message)
+
+    # Validate the file's *actual* content against its claimed extension
+    # (magic-byte sniffing) to catch spoofed uploads (e.g. an executable or
+    # script simply renamed with an allowed extension like ".docx").
+    from pathlib import Path as _PathForContentCheck
+    claimed_extension = _PathForContentCheck(file.filename).suffix.lower().lstrip('.')
+    content_valid, content_error = validate_file_content(file, claimed_extension)
+    if not content_valid:
+        raise FileUploadException(content_error)
 
     # Save file
     upload_folder = current_app.config['UPLOAD_FOLDER']

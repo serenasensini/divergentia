@@ -50,6 +50,14 @@ class Config:
     UPLOAD_FOLDER = _resolve_path(os.getenv('UPLOAD_FOLDER', 'uploads'))
     OUTPUT_FOLDER = _resolve_path(os.getenv('OUTPUT_FOLDER', 'outputs'))
 
+    # Reject oversized request bodies at the Werkzeug/WSGI level, before Flask
+    # buffers the whole upload into memory. This is the framework-level
+    # enforcement of MAX_UPLOAD_SIZE (defense in depth against large-payload
+    # DoS): app-level checks in `validate_file()` run *after* the body has
+    # already been read, so they alone cannot prevent the memory/disk cost of
+    # accepting an oversized request in the first place.
+    MAX_CONTENT_LENGTH = MAX_UPLOAD_SIZE
+
     # Document Conversion (DOC/PDF -> DOCX via headless LibreOffice)
     LIBREOFFICE_BIN = os.getenv('LIBREOFFICE_BIN', 'soffice')
     DOC_CONVERSION_TIMEOUT = int(os.getenv('DOC_CONVERSION_TIMEOUT', 120))
@@ -90,7 +98,10 @@ class ProductionConfig(Config):
     """Production environment configuration"""
     DEBUG = False
     TESTING = False
-    LOG_LEVEL = 'WARNING'
+    # Defaults to WARNING (quieter than development) but still honours an
+    # explicit LOG_LEVEL env var (e.g. set in docker-compose.yml), which the
+    # previous hardcoded value silently ignored.
+    LOG_LEVEL = os.getenv('LOG_LEVEL', 'WARNING')
 
     @classmethod
     def init_app(cls, app):
