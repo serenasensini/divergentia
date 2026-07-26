@@ -82,17 +82,28 @@ jobs:
         id: check_vulnerabilities
         if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
         run: |
-          VULN_COUNT=$(jq '.runs[0].results | length' scan-results-${{ matrix.component.name }}.sarif.json)
-          echo "Vulnerabilità trovate (${{ matrix.component.name }}): $VULN_COUNT"
-          echo "vuln_count=$VULN_COUNT" >> "$GITHUB_OUTPUT"
+          FILE="scan-results-${{ matrix.component.name }}.sarif.json"
+          VULN_COUNT=$(jq '.runs[0].results | length' "$FILE")
 
-          if [[ "$VULN_COUNT" -gt 0 ]]; then
+          # Il merge viene bloccato solo per CRITICAL/HIGH: le vulnerabilità di
+          # severità inferiore (o quelle dei pacchetti di sistema dell'immagine
+          # base non ancora patchate da Debian) sono comunque visibili nel
+          # report/commento ma non fermano la pipeline.
+          # Docker Scout riporta la severità dentro `message.text`
+          # ("Severity   :HIGH"), non in modo affidabile nel campo `level`.
+          HIGH_CRITICAL_COUNT=$(jq '[.runs[0].results[] | select(.message.text | test("Severity\\s*:\\s*(CRITICAL|HIGH)"; "i"))] | length' "$FILE")
+
+          echo "Vulnerabilità trovate (${{ matrix.component.name }}): $VULN_COUNT totali, $HIGH_CRITICAL_COUNT CRITICAL/HIGH"
+          echo "vuln_count=$VULN_COUNT" >> "$GITHUB_OUTPUT"
+          echo "high_critical_count=$HIGH_CRITICAL_COUNT" >> "$GITHUB_OUTPUT"
+
+          if [[ "$HIGH_CRITICAL_COUNT" -gt 0 ]]; then
             echo "fail_workflow=true" >> "$GITHUB_OUTPUT"
           else
             echo "fail_workflow=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Commenta sulla PR con le vulnerabilità (${{ matrix.component.name }})
+      - name: Commenta sulla PR con le vulnerabilità CRITICAL/HIGH (${{ matrix.component.name }})
         if: >
           github.event_name == 'pull_request' &&
           steps.check_vulnerabilities.outputs.fail_workflow == 'true'
@@ -157,10 +168,14 @@ jobs:
               ? ` Mostrate le ${MAX_ROWS} vulnerabilità più severe su ${results.length} totali (ordinate per severità): esegui \`docker scout cves ${image}\` localmente per l'elenco completo.`
               : '';
 
+            const highCriticalCount = results.filter(r => ['CRITICAL', 'HIGH'].includes(severityOf(r))).length;
+
             const body = [
-              `## ⚠️ Vulnerabilità trovate nell'immagine Docker (${component})`,
+              `## ⚠️ Vulnerabilità CRITICAL/HIGH trovate nell'immagine Docker (${component})`,
               ``,
-              `Docker Scout ha rilevato **${results.length} vulnerabilità** nell'immagine \`${image}\`.`,
+              `Docker Scout ha rilevato **${highCriticalCount} vulnerabilità CRITICAL/HIGH** ` +
+                `(su ${results.length} totali) nell'immagine \`${image}\`. Il merge è bloccato ` +
+                `solo per queste severità: le altre restano visibili ma non fermano la pipeline.`,
               ``,
               summaryLine,
               ``,
@@ -179,12 +194,12 @@ jobs:
               body: body
             });
 
-      - name: Blocca il workflow se ci sono vulnerabilità (${{ matrix.component.name }})
+      - name: Blocca il workflow se ci sono vulnerabilità CRITICAL/HIGH (${{ matrix.component.name }})
         if: >
           (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') &&
           steps.check_vulnerabilities.outputs.fail_workflow == 'true'
         run: |
-          echo "::error::Trovate ${{ steps.check_vulnerabilities.outputs.vuln_count }} vulnerabilità nell'immagine ${{ matrix.component.name }}. Il merge è bloccato."
+          echo "::error::Trovate ${{ steps.check_vulnerabilities.outputs.high_critical_count }} vulnerabilità CRITICAL/HIGH (su ${{ steps.check_vulnerabilities.outputs.vuln_count }} totali) nell'immagine ${{ matrix.component.name }}. Il merge è bloccato."
           exit 1
 
       # ─── PUSH — solo su merge in main ─────────────────────────────────────────
