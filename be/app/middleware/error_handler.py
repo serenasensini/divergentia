@@ -2,7 +2,7 @@
 Error Handler Middleware
 """
 import logging
-from flask import jsonify
+from flask import jsonify, current_app
 from werkzeug.exceptions import HTTPException
 
 from app.exceptions.custom_exceptions import ApplicationException
@@ -72,6 +72,40 @@ def handle_internal_error(error):
     }
 
     return jsonify(response), 500
+
+
+def handle_request_entity_too_large(error):
+    """
+    Handle 413 "Payload Too Large" errors.
+
+    Raised automatically by Werkzeug when the incoming request body exceeds
+    ``MAX_CONTENT_LENGTH`` (see ``app/config.py``), *before* the request body
+    is fully read into memory. Without this handler Flask would fall back to
+    the default HTML error page instead of a clear, actionable JSON response.
+
+    Args:
+        error: The RequestEntityTooLarge exception instance.
+
+    Returns:
+        JSON response including the configured maximum upload size.
+    """
+    max_size = current_app.config.get('MAX_CONTENT_LENGTH') or current_app.config.get('MAX_UPLOAD_SIZE', 0)
+    max_size_mb = max_size / (1024 * 1024) if max_size else None
+
+    logger.warning(f"Upload rejected: request exceeds the {max_size_mb:.1f}MB limit" if max_size_mb else "Upload rejected: request too large")
+
+    response = {
+        'error': 'FileTooLarge',
+        'message': (
+            f"File exceeds the maximum allowed size of {max_size_mb:.1f}MB"
+            if max_size_mb else "File exceeds the maximum allowed size"
+        ),
+        'status_code': 413,
+        'max_upload_size_bytes': max_size,
+        'max_upload_size_mb': round(max_size_mb, 1) if max_size_mb else None,
+    }
+
+    return jsonify(response), 413
 
 
 def handle_custom_exception(error: ApplicationException):

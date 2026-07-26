@@ -8,6 +8,7 @@ import tempfile
 import pytest
 from docx import Document
 from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
 
 import app.services.keyword_service as ks
 from app.services.formatting_service import get_formatting_service
@@ -191,4 +192,104 @@ class TestFramingAcrossPageBreak:
         t = doc.tables[0]
         for side in ('top', 'bottom', 'left', 'right'):
             assert _side_val(t, side) == 'double'
+
+
+class TestFramingLists:
+    """A contiguous run of list items is framed as a single box (issue #14)."""
+
+    @staticmethod
+    def _add_num_pr(paragraph, num_id="1", ilvl="0"):
+        """Attach direct ``w:numPr`` to a paragraph, as Word does for real lists."""
+        pPr = paragraph._p.get_or_add_pPr()
+        num_pr = OxmlElement('w:numPr')
+        ilvl_el = OxmlElement('w:ilvl')
+        ilvl_el.set(qn('w:val'), ilvl)
+        num_id_el = OxmlElement('w:numId')
+        num_id_el.set(qn('w:val'), num_id)
+        num_pr.append(ilvl_el)
+        num_pr.append(num_id_el)
+        pPr.append(num_pr)
+
+    def _build_doc_with_list(self, path, list_style="List Bullet"):
+        doc = Document()
+        doc.add_paragraph("Chapter One", style="Heading 1")
+        doc.add_paragraph("Intro paragraph before the list.")
+        for text in ("First item", "Second item", "Third item"):
+            p = doc.add_paragraph(text, style=list_style)
+            self._add_num_pr(p)
+        doc.add_paragraph("Outro paragraph after the list.")
+        doc.save(path)
+
+    def test_list_items_grouped_into_single_table(self):
+        with tempfile.TemporaryDirectory() as d:
+            inp = os.path.join(d, "in.docx")
+            out = os.path.join(d, "out.docx")
+            self._build_doc_with_list(inp)
+
+            res = get_formatting_service().apply_framing(
+                inp, out, {"paragraphs": True, "use_tables": True})
+            assert res["success"] is True
+
+            doc = Document(out)
+            # 2 non-list paragraphs framed individually + 1 table for the
+            # whole list (not one table per list item).
+            assert len(doc.tables) == 3
+
+            list_table = next(
+                t for t in doc.tables if len(t.rows[0].cells[0].paragraphs) == 3
+            )
+            cell = list_table.rows[0].cells[0]
+            assert [p.text for p in cell.paragraphs] == [
+                "First item", "Second item", "Third item",
+            ]
+
+    def test_list_numbering_preserved_when_framed(self):
+        with tempfile.TemporaryDirectory() as d:
+            inp = os.path.join(d, "in.docx")
+            out = os.path.join(d, "out.docx")
+            self._build_doc_with_list(inp)
+
+            res = get_formatting_service().apply_framing(
+                inp, out, {"paragraphs": True, "use_tables": True})
+            assert res["success"] is True
+
+            doc = Document(out)
+            list_table = next(
+                t for t in doc.tables if len(t.rows[0].cells[0].paragraphs) == 3
+            )
+            for p in list_table.rows[0].cells[0].paragraphs:
+                pPr = p._p.pPr
+                assert pPr is not None
+                assert pPr.find(qn('w:numPr')) is not None, (
+                    "List numbering (w:numPr) should be preserved when the "
+                    "list is encapsulated in a table"
+                )
+
+    def test_list_split_across_page_break_reuses_segmentation(self):
+        with tempfile.TemporaryDirectory() as d:
+            inp = os.path.join(d, "in.docx")
+            out = os.path.join(d, "out.docx")
+            doc = Document()
+            doc.add_paragraph("Chapter One", style="Heading 1")
+            p1 = doc.add_paragraph("First item", style="List Bullet")
+            self._add_num_pr(p1)
+            second = doc.add_paragraph("Second item", style="List Bullet")
+            self._add_num_pr(second)
+            second.paragraph_format.page_break_before = True
+            p3 = doc.add_paragraph("Third item", style="List Bullet")
+            self._add_num_pr(p3)
+            doc.save(inp)
+
+            res = get_formatting_service().apply_framing(
+                inp, out, {"paragraphs": True, "use_tables": True})
+            assert res["success"] is True
+
+            out_doc = Document(out)
+            # The list run spans a page break: it becomes 2 open-ended boxes
+            # instead of one, exactly like sections/paragraphs already do.
+            assert len(out_doc.tables) == 2
+            first, second_table = out_doc.tables
+            assert _side_val(first, 'bottom') == 'nil'
+            assert _side_val(second_table, 'top') == 'nil'
+
 
