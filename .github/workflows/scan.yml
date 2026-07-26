@@ -8,6 +8,10 @@ on:
     types: [opened, synchronize, reopened]
     branches:
       - main
+  # Esecuzione manuale: builda e scansiona le immagini backend/frontend anche
+  # fuori da una pull request (nessun commento verrà pubblicato, dato che non
+  # esiste una PR associata).
+  workflow_dispatch: {}
 
 jobs:
   build-and-scan:
@@ -44,21 +48,21 @@ jobs:
 
       # ─── SCOUT — solo su PR ──────────────────────────────────────────────────
       - name: Installazione Docker Scout CLI
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
         run: |
           curl -fsSL https://raw.githubusercontent.com/docker/scout-cli/main/install.sh \
             -o install-scout.sh
           sh install-scout.sh
 
       - name: Autenticazione Docker Scout
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
         run: |
           echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login \
             --username "${{ secrets.DOCKERHUB_USER }}" \
             --password-stdin
 
       - name: Scansione vulnerabilità con Docker Scout (${{ matrix.component.name }})
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
         run: |
           docker scout cves "${{ matrix.component.image }}" \
             --ignore-base \
@@ -68,7 +72,7 @@ jobs:
       # ─── ANALISI RISULTATI ────────────────────────────────────────────────────
       - name: Verifica vulnerabilità (${{ matrix.component.name }})
         id: check_vulnerabilities
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
         run: |
           VULN_COUNT=$(jq '.runs[0].results | length' scan-results-${{ matrix.component.name }}.sarif.json)
           echo "Vulnerabilità trovate (${{ matrix.component.name }}): $VULN_COUNT"
@@ -94,23 +98,58 @@ jobs:
             const sarif = JSON.parse(fs.readFileSync(`scan-results-${component}.sarif.json`, 'utf8'));
             const results = sarif.runs[0].results;
 
-            const lines = results.map(r => {
-              const level = r.level || 'unknown';
-              const ruleId = r.ruleId || 'N/A';
-              const msg = r.message?.text || 'Nessun dettaglio disponibile';
-              return `| \`${ruleId}\` | ${level} | ${msg} |`;
-            }).join('\n');
+            // Docker Scout's SARIF `message.text` is a multi-line key/value
+            // blob (Vulnerability/Severity/Package/...), not a single
+            // sentence: dumping it as-is into a table cell breaks the
+            // Markdown table (each embedded newline starts a "new row").
+            // Extract the fields we care about and render one clean row per
+            // finding instead.
+            const field = (text, label) => {
+              const m = text.match(new RegExp(`${label}\\s*:\\s*(.+)`));
+              return m ? m[1].trim() : '';
+            };
+            // Belt-and-braces: collapse any stray newline and escape pipes so
+            // a single malformed entry can never break the table layout.
+            const sanitize = (s) => String(s || '').replace(/\r?\n/g, ' ').replace(/\|/g, '\\|').trim();
+
+            const MAX_ROWS = 50;
+            const shown = results.slice(0, MAX_ROWS);
+
+            const severityCounts = {};
+            for (const r of results) {
+              const text = r.message?.text || '';
+              const sev = sanitize(field(text, 'Severity') || r.level || 'unknown');
+              severityCounts[sev] = (severityCounts[sev] || 0) + 1;
+            }
+            const summaryLine = Object.entries(severityCounts)
+              .map(([sev, count]) => `**${sev}**: ${count}`)
+              .join(' · ');
+
+            const rows = shown.map(r => {
+              const text = r.message?.text || '';
+              const cve = sanitize(field(text, 'Vulnerability') || r.ruleId || 'N/A');
+              const severity = sanitize(field(text, 'Severity') || r.level || 'unknown');
+              const pkg = sanitize(field(text, 'Package') || 'N/A');
+              const fixed = sanitize(field(text, 'Fixed version') || 'N/A');
+              return `| \`${cve}\` | ${severity} | \`${pkg}\` | ${fixed} |`;
+            });
+
+            const truncatedNote = results.length > MAX_ROWS
+              ? ` Mostrate le prime ${MAX_ROWS} vulnerabilità su ${results.length}: esegui \`docker scout cves ${image}\` localmente per l'elenco completo.`
+              : '';
 
             const body = [
               `## ⚠️ Vulnerabilità trovate nell'immagine Docker (${component})`,
               ``,
               `Docker Scout ha rilevato **${results.length} vulnerabilità** nell'immagine \`${image}\`.`,
               ``,
-              `| CVE / Regola | Severità | Descrizione |`,
-              `|---|---|---|`,
-              lines,
+              summaryLine,
               ``,
-              `> Le vulnerabilità elencate escludono quelle già presenti nell'immagine base (\`--ignore-base\`).`,
+              `| CVE | Severità | Pacchetto | Versione corretta |`,
+              `|---|---|---|---|`,
+              ...rows,
+              ``,
+              `> Le vulnerabilità elencate escludono quelle già presenti nell'immagine base (\`--ignore-base\`).${truncatedNote}`,
               `> Risolvi i problemi e ri-pusha per aggiornare questa analisi.`
             ].join('\n');
 
@@ -123,7 +162,7 @@ jobs:
 
       - name: Blocca il workflow se ci sono vulnerabilità (${{ matrix.component.name }})
         if: >
-          github.event_name == 'pull_request' &&
+          (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') &&
           steps.check_vulnerabilities.outputs.fail_workflow == 'true'
         run: |
           echo "::error::Trovate ${{ steps.check_vulnerabilities.outputs.vuln_count }} vulnerabilità nell'immagine ${{ matrix.component.name }}. Il merge è bloccato."
