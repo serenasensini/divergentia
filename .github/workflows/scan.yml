@@ -69,6 +69,14 @@ jobs:
             --format sarif \
             --output scan-results-${{ matrix.component.name }}.sarif.json
 
+      - name: Carica il report SARIF completo come artifact (${{ matrix.component.name }})
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-results-${{ matrix.component.name }}-${{ github.run_id }}
+          path: scan-results-${{ matrix.component.name }}.sarif.json
+          retention-days: 14
+
       # ─── ANALISI RISULTATI ────────────────────────────────────────────────────
       - name: Verifica vulnerabilità (${{ matrix.component.name }})
         id: check_vulnerabilities
@@ -112,16 +120,27 @@ jobs:
             // a single malformed entry can never break the table layout.
             const sanitize = (s) => String(s || '').replace(/\r?\n/g, ' ').replace(/\|/g, '\\|').trim();
 
+            // Higher-severity findings must never be silently truncated out of
+            // the table: sort by severity (most critical first) before capping.
+            const SEVERITY_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, UNSPECIFIED: 4, UNKNOWN: 5, NONE: 6 };
+            const severityOf = (r) => {
+              const text = r.message?.text || '';
+              return sanitize(field(text, 'Severity') || r.level || 'unknown').toUpperCase();
+            };
+            const rankOf = (sev) => SEVERITY_RANK[sev] ?? 99;
+
+            const sortedResults = [...results].sort((a, b) => rankOf(severityOf(a)) - rankOf(severityOf(b)));
+
             const MAX_ROWS = 50;
-            const shown = results.slice(0, MAX_ROWS);
+            const shown = sortedResults.slice(0, MAX_ROWS);
 
             const severityCounts = {};
             for (const r of results) {
-              const text = r.message?.text || '';
-              const sev = sanitize(field(text, 'Severity') || r.level || 'unknown');
+              const sev = severityOf(r);
               severityCounts[sev] = (severityCounts[sev] || 0) + 1;
             }
             const summaryLine = Object.entries(severityCounts)
+              .sort((a, b) => rankOf(a[0]) - rankOf(b[0]))
               .map(([sev, count]) => `**${sev}**: ${count}`)
               .join(' · ');
 
@@ -135,7 +154,7 @@ jobs:
             });
 
             const truncatedNote = results.length > MAX_ROWS
-              ? ` Mostrate le prime ${MAX_ROWS} vulnerabilità su ${results.length}: esegui \`docker scout cves ${image}\` localmente per l'elenco completo.`
+              ? ` Mostrate le ${MAX_ROWS} vulnerabilità più severe su ${results.length} totali (ordinate per severità): esegui \`docker scout cves ${image}\` localmente per l'elenco completo.`
               : '';
 
             const body = [
