@@ -48,11 +48,20 @@ jobs:
 
       # ─── SCOUT — solo su PR o esecuzione manuale ─────────────────────────────
       # Usa l'action ufficiale Docker Scout invece della CLI installata a mano:
-      # gestisce da sola autenticazione, filtro per severità, exit-code di
-      # blocco e commento sulla PR con formattazione corretta (evita i bug di
-      # rendering Markdown incontrati parsando a mano il SARIF).
+      # gestisce da sola autenticazione, commento sulla PR con formattazione
+      # corretta e job summary (evita i bug di rendering Markdown incontrati
+      # parsando a mano il SARIF).
       # https://github.com/docker/scout-action
-      - name: Docker Scout - Analisi vulnerabilità (${{ matrix.component.name }})
+      #
+      # NB: `only-severities` filtra l'INTERO comando `docker scout cves`, non
+      # solo cosa viene mostrato: se lo si passasse a un'unica invocazione, il
+      # SARIF/commento conterrebbe solo CRITICAL/HIGH e le vulnerabilità
+      # MEDIUM/LOW risulterebbero (erroneamente) "assenti" invece che presenti
+      # ma non bloccanti. Per questo lo scan è diviso in due passaggi:
+      # 1) report completo (tutte le severità) per visibilità/commento/SARIF;
+      # 2) verifica separata, filtrata su CRITICAL/HIGH, che decide solo se
+      #    bloccare la pipeline (senza scrivere un secondo commento).
+      - name: Docker Scout - Report completo vulnerabilità (${{ matrix.component.name }})
         if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
         uses: docker/scout-action@v1
         with:
@@ -61,8 +70,6 @@ jobs:
           dockerhub-user: ${{ secrets.DOCKERHUB_USER }}
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
           ignore-base: true
-          only-severities: critical,high
-          exit-code: true
           sarif-file: scan-results-${{ matrix.component.name }}.sarif.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           write-comment: true
@@ -78,6 +85,21 @@ jobs:
           path: scan-results-${{ matrix.component.name }}.sarif.json
           retention-days: 14
           if-no-files-found: warn
+
+      - name: Docker Scout - Blocca solo su CRITICAL/HIGH (${{ matrix.component.name }})
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+        uses: docker/scout-action@v1
+        with:
+          command: cves
+          image: ${{ matrix.component.image }}
+          dockerhub-user: ${{ secrets.DOCKERHUB_USER }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+          ignore-base: true
+          only-severities: critical,high
+          exit-code: true
+          write-comment: false
+          summary: false
+
 
       # ─── PUSH — solo su merge in main ─────────────────────────────────────────
       # Push disabilitato per il momento: nessun registry di destinazione configurato.
