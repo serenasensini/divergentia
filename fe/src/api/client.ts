@@ -193,10 +193,11 @@ export function createApiClient(options: ApiClientOptions = {}) {
       documentId: string,
       summaryType: SummaryType,
       addToDocument = false,
+      model?: string,
     ): Promise<SummarizeResponse> {
       return postJson(
         url(`/api/documents/${documentId}/summarize`),
-        { summary_type: summaryType, add_to_document: addToDocument },
+        { summary_type: summaryType, add_to_document: addToDocument, model },
         doFetch,
       );
     },
@@ -205,10 +206,11 @@ export function createApiClient(options: ApiClientOptions = {}) {
       documentId: string,
       style: ParaphraseStyle,
       applyToDocument = false,
+      model?: string,
     ): Promise<ParaphraseResponse> {
       return postJson(
         url(`/api/documents/${documentId}/paraphrase`),
-        { style, apply_to_document: applyToDocument },
+        { style, apply_to_document: applyToDocument, model },
         doFetch,
       );
     },
@@ -216,10 +218,11 @@ export function createApiClient(options: ApiClientOptions = {}) {
     async summarizeText(
       text: string,
       maxLength = 500,
+      model?: string,
     ): Promise<TextSummarizeResponse> {
       return postJson(
         url('/api/text/summarize'),
-        { text, max_length: maxLength },
+        { text, max_length: maxLength, model },
         doFetch,
       );
     },
@@ -227,8 +230,9 @@ export function createApiClient(options: ApiClientOptions = {}) {
     async paraphraseText(
       text: string,
       style: ParaphraseStyle,
+      model?: string,
     ): Promise<TextParaphraseResponse> {
-      return postJson(url('/api/text/paraphrase'), { text, style }, doFetch);
+      return postJson(url('/api/text/paraphrase'), { text, style, model }, doFetch);
     },
 
     /** Absolute-or-relative URL to download the latest processed document. */

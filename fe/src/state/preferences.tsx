@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { DEFAULT_CHARACTER_ID } from './characters';
+import { DEFAULT_AI_MODEL_TIER, type AiModelTier } from './aiModels';
 
 /**
  * Accessibility + personalisation preferences.
@@ -42,6 +43,12 @@ export interface Preferences {
   language: Language;
   /** Whether the Welcome room has been completed at least once. */
   onboarded: boolean;
+  /**
+   * Preferred AI model tier for all Ollama-backed features (keywords,
+   * summary, rephrase). The user only ever picks a friendly tier label; this
+   * resolves to a concrete Ollama model id under the hood (see aiModels.ts).
+   */
+  aiModel: AiModelTier;
 }
 
 const STORAGE_KEY = 'divergentia.preferences.v1';
@@ -67,6 +74,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   soundEffects: false,
   language: detectLanguage(),
   onboarded: false,
+  aiModel: DEFAULT_AI_MODEL_TIER,
 };
 
 function loadPreferences(): Preferences {

@@ -4,6 +4,7 @@ Ollama Service - AI-powered text processing (Summarization & Paraphrasing)
 import logging
 import re
 import time
+from contextlib import contextmanager
 from typing import Dict, List, Optional, Any
 from functools import wraps
 
@@ -53,7 +54,12 @@ class OllamaService:
     def __init__(self):
         """Initialize Ollama service with configuration from Flask app"""
         self.base_url = current_app.config.get('OLLAMA_BASE_URL', 'http://localhost:11434')
-        self.model = current_app.config.get('OLLAMA_MODEL', 'llama3:8b')
+        # `default_model` is the server-configured fallback (see issue #22):
+        # when a caller requests a specific model (e.g. an FE "AI model tier")
+        # that turns out to be unavailable on this Ollama instance, we degrade
+        # gracefully to this default instead of failing the whole request.
+        self.default_model = current_app.config.get('OLLAMA_MODEL', 'llama3:8b')
+        self.model = self.default_model
         self.timeout = current_app.config.get('OLLAMA_TIMEOUT', 120)
         self.max_retries = current_app.config.get('OLLAMA_MAX_RETRIES', 3)
 
@@ -70,6 +76,32 @@ class OllamaService:
         """Generate cache key for request"""
         params_str = '_'.join(f"{k}={v}" for k, v in sorted(kwargs.items()))
         return f"{operation}_{hash(text)}_{params_str}"
+
+    @contextmanager
+    def _use_model(self, model: Optional[str]):
+        """
+        Temporarily use ``model`` for the Ollama calls made within this
+        context, restoring the configured default model afterwards.
+
+        This lets a single request (e.g. one summarize/paraphrase/keyword
+        call) opt into a specific model — such as one of the FE's "AI model
+        tier" reference models (see issue #22) — without mutating shared
+        service state beyond the current call. A falsy ``model`` is a no-op:
+        the service keeps using its configured default.
+
+        Args:
+            model: Ollama model tag to use for this call, or None/'' to keep
+                the current default.
+        """
+        if not model:
+            yield
+            return
+        original_model = self.model
+        self.model = model
+        try:
+            yield
+        finally:
+            self.model = original_model
 
     # Human readable names (in English) for the most common ISO 639-1 codes.
     # Passing an explicit language name to the model yields more reliable
@@ -177,6 +209,32 @@ class OllamaService:
             logger.error(f"Failed to connect to Ollama: {str(e)}")
             raise OllamaConnectionException(f"Connection failed: {str(e)}")
         except Exception as e:
+            # Graceful degradation (issue #22): if a non-default model (e.g.
+            # an FE "AI model tier" the operator hasn't pulled) fails, retry
+            # once with the server-configured default model instead of
+            # failing the whole request outright.
+            if self.model != self.default_model:
+                logger.warning(
+                    f"Model '{self.model}' unavailable or failed; "
+                    f"falling back to default model '{self.default_model}'"
+                )
+                try:
+                    response = self._client.generate(
+                        model=self.default_model,
+                        prompt=prompt,
+                        stream=stream,
+                        **options
+                    )
+                    if stream:
+                        full_response = ""
+                        for chunk in response:
+                            full_response += chunk.get('response', '')
+                        return full_response
+                    return response.get('response', '')
+                except Exception as fallback_error:
+                    logger.error(f"Ollama processing error (fallback model): {str(fallback_error)}")
+                    raise OllamaProcessingException(f"Processing failed: {str(fallback_error)}")
+
             logger.error(f"Ollama processing error: {str(e)}")
             raise OllamaProcessingException(f"Processing failed: {str(e)}")
 
@@ -184,6 +242,7 @@ class OllamaService:
         self,
         text: str,
         max_length: int = 500,
+        model: Optional[str] = None,
         use_cache: bool = True
     ) -> str:
         """
@@ -192,6 +251,9 @@ class OllamaService:
         Args:
             text: Text to summarize
             max_length: Maximum length of summary in words
+            model: Optional Ollama model tag to use for this call (e.g. one of
+                the FE "AI model tier" reference models). Falls back to the
+                service's configured default model when omitted.
             use_cache: Whether to use cached results
 
         Returns:
@@ -200,7 +262,7 @@ class OllamaService:
         logger.info(f"Summarizing text (length: {len(text)} chars)")
 
         # Check cache
-        cache_key = self._get_cache_key('summarize', text, max_length=max_length)
+        cache_key = self._get_cache_key('summarize', text, max_length=max_length, model=model or self.model)
         if use_cache and cache_key in self._cache:
             logger.info("Returning cached summary")
             return self._cache[cache_key]
@@ -214,7 +276,8 @@ Text to summarize:
 
 Summary:"""
 
-        summary = self._generate_completion(prompt)
+        with self._use_model(model):
+            summary = self._generate_completion(prompt)
 
         # Cache result
         if use_cache:
@@ -227,6 +290,7 @@ Summary:"""
         self,
         text: str,
         style: str = 'formal',
+        model: Optional[str] = None,
         use_cache: bool = True
     ) -> str:
         """
@@ -235,6 +299,9 @@ Summary:"""
         Args:
             text: Text to paraphrase
             style: Style of paraphrasing ('formal', 'casual', 'professional', 'simple')
+            model: Optional Ollama model tag to use for this call (e.g. one of
+                the FE "AI model tier" reference models). Falls back to the
+                service's configured default model when omitted.
             use_cache: Whether to use cached results
 
         Returns:
@@ -243,7 +310,7 @@ Summary:"""
         logger.info(f"Paraphrasing text with style: {style}")
 
         # Check cache
-        cache_key = self._get_cache_key('paraphrase', text, style=style)
+        cache_key = self._get_cache_key('paraphrase', text, style=style, model=model or self.model)
         if use_cache and cache_key in self._cache:
             logger.info("Returning cached paraphrase")
             return self._cache[cache_key]
@@ -266,7 +333,8 @@ Original text:
 
 Paraphrased text:"""
 
-        paraphrased = self._generate_completion(prompt)
+        with self._use_model(model):
+            paraphrased = self._generate_completion(prompt)
 
         # Cache result
         if use_cache:
@@ -278,7 +346,8 @@ Paraphrased text:"""
     def summarize_document(
         self,
         text: str,
-        summary_type: str = 'brief'
+        summary_type: str = 'brief',
+        model: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Summarize an entire document with metadata.
@@ -286,6 +355,7 @@ Paraphrased text:"""
         Args:
             text: Full document text
             summary_type: Type of summary ('brief', 'detailed', 'executive')
+            model: Optional Ollama model tag to use (see issue #22 AI model tiers).
 
         Returns:
             Dictionary with summary and metadata
@@ -301,10 +371,10 @@ Paraphrased text:"""
         max_length = length_map.get(summary_type, 500)
 
         # Generate summary
-        summary = self.summarize_text(text, max_length=max_length)
+        summary = self.summarize_text(text, max_length=max_length, model=model)
 
         # Extract key points
-        key_points = self.get_key_points(text, num_points=5)
+        key_points = self.get_key_points(text, num_points=5, model=model)
 
         return {
             'summary': summary,
@@ -318,7 +388,8 @@ Paraphrased text:"""
     def batch_paraphrase(
         self,
         text_chunks: List[str],
-        style: str = 'formal'
+        style: str = 'formal',
+        model: Optional[str] = None
     ) -> List[str]:
         """
         Paraphrase multiple text chunks.
@@ -326,6 +397,7 @@ Paraphrased text:"""
         Args:
             text_chunks: List of text chunks to paraphrase
             style: Style of paraphrasing
+            model: Optional Ollama model tag to use (see issue #22 AI model tiers).
 
         Returns:
             List of paraphrased texts
@@ -335,7 +407,7 @@ Paraphrased text:"""
         paraphrased_chunks = []
         for i, chunk in enumerate(text_chunks):
             logger.debug(f"Paraphrasing chunk {i+1}/{len(text_chunks)}")
-            paraphrased = self.paraphrase_text(chunk, style=style)
+            paraphrased = self.paraphrase_text(chunk, style=style, model=model)
             paraphrased_chunks.append(paraphrased)
 
         logger.info("Batch paraphrasing completed")
@@ -424,9 +496,12 @@ Paraphrased text:"""
                     {text}
                     
                     Parole chiave:"""
-            logger.debug(f"Prompt for keyword extraction: {prompt}")
+            # NOTE: do not log `prompt`/`response` at any level: both embed
+            # the source document's text, which may contain personal or
+            # otherwise sensitive information (see issue #12).
+            logger.debug(f"Prompt for keyword extraction built (length: {len(prompt)} chars)")
             response = self._generate_completion(prompt, stream=True)
-            logger.debug(f"Raw response for keyword extraction: {response.strip()}")
+            logger.debug(f"Raw response for keyword extraction received (length: {len(response)} chars)")
 
             # Parse response - expecting comma-separated keywords
             keywords_text = response.strip()
@@ -452,7 +527,7 @@ Paraphrased text:"""
             if use_cache:
                 self._cache[cache_key] = keywords
 
-            logger.info(f"Extracted {len(keywords)} keywords: {keywords}")
+            logger.info(f"Extracted {len(keywords)} keywords")
             return keywords
 
         finally:
@@ -463,7 +538,8 @@ Paraphrased text:"""
     def get_key_points(
         self,
         text: str,
-        num_points: int = 5
+        num_points: int = 5,
+        model: Optional[str] = None
     ) -> List[str]:
         """
         Extract key points from text.
@@ -471,6 +547,7 @@ Paraphrased text:"""
         Args:
             text: Text to analyze
             num_points: Number of key points to extract
+            model: Optional Ollama model tag to use (see issue #22 AI model tiers).
 
         Returns:
             List of key points
@@ -488,9 +565,13 @@ Paraphrased text:"""
                 {text}
                 
                 Key points (one per line, numbered):"""
-        logger.debug(f"Prompt for key point extraction: {prompt}")
-        response = self._generate_completion(prompt)
-        logger.debug(f"Extracted {num_points} key points: {response.strip()}")
+        # NOTE: do not log `prompt`/`response` at any level: both embed the
+        # source document's text, which may contain personal or otherwise
+        # sensitive information (see issue #12).
+        logger.debug(f"Prompt for key point extraction built (length: {len(prompt)} chars)")
+        with self._use_model(model):
+            response = self._generate_completion(prompt)
+        logger.debug(f"Extracted {num_points} key points (response length: {len(response)} chars)")
 
         # Parse response into list
         lines = response.strip().split('\n')

@@ -939,7 +939,8 @@ def summarize_document(document_id: str):
         document_id=document_id,
         summary_type=validated_data.summary_type,
         add_to_document=validated_data.add_to_document,
-        output_folder=output_folder
+        output_folder=output_folder,
+        model=validated_data.model
     )
 
     return jsonify(result), 200
@@ -992,7 +993,8 @@ def paraphrase_document(document_id: str):
         style=validated_data.style,
         sections=validated_data.sections,
         apply_to_document=validated_data.apply_to_document,
-        output_folder=output_folder
+        output_folder=output_folder,
+        model=validated_data.model
     )
 
     return jsonify(result), 200
@@ -1026,7 +1028,8 @@ def summarize_text():
     ollama_service = get_ollama_service()
     summary = ollama_service.summarize_text(
         text=validated_data.text,
-        max_length=validated_data.max_length
+        max_length=validated_data.max_length,
+        model=validated_data.model
     )
 
     return jsonify({
@@ -1064,7 +1067,8 @@ def paraphrase_text():
     ollama_service = get_ollama_service()
     paraphrased = ollama_service.paraphrase_text(
         text=validated_data.text,
-        style=validated_data.style
+        style=validated_data.style,
+        model=validated_data.model
     )
 
     return jsonify({

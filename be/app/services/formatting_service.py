@@ -959,7 +959,7 @@ class FormattingService:
                 for run in paragraph.runs:
                     run.font.color.rgb = RGBColor(*color_rgb)
                 colored += 1
-                logger.debug(f"Colored textbox caption: '{paragraph.text[:50]}...'")
+                logger.debug(f"Colored textbox caption (length: {len(paragraph.text)} chars)")
         logger.info(f"Colored {colored} textbox caption paragraph(s)")
         return colored
 
@@ -1112,7 +1112,7 @@ class FormattingService:
         from app.services.keyword_service import get_keyword_service
 
         text = paragraph.text
-        logger.debug(f"Adding sentence spacing to paragraph: '{text[:50]}...'")
+        logger.debug(f"Adding sentence spacing to paragraph (length: {len(text)} chars)")
 
         if not text.strip():
             return
@@ -1174,7 +1174,7 @@ class FormattingService:
 
         logger.info(f"Identified {len(sections)} sections")
         for idx, (start, end, text) in enumerate(sections):
-            logger.debug(f"Section {idx}: paragraphs {start}-{end}, text preview: '{text[:100]}...'")
+            logger.debug(f"Section {idx}: paragraphs {start}-{end}, length: {len(text)} chars")
 
         return sections
 
@@ -1199,7 +1199,7 @@ class FormattingService:
 
         logger.info(f"Identified {len(paragraphs)} paragraphs (text following section headings)")
         if paragraphs:
-            logger.debug(f"Example of identified paragraphs: {[doc.paragraphs[i].text[:30] for i in paragraphs[:3]]}")
+            logger.debug(f"Example identified paragraph indices: {paragraphs[:3]}")
         return paragraphs
 
     def _identify_subparagraphs(self, doc: Document, structure: Optional[DocumentStructure] = None) -> List[Tuple[int, List[int]]]:
@@ -1385,7 +1385,7 @@ class FormattingService:
                 logging.debug(f"Identifying PARAGRAPHS for spacing application")
                 paragraphs = self._identify_paragraphs(doc, structure)
                 for idx in paragraphs:
-                    logger.debug(f"Applying spacing to paragraph {idx}: '{doc.paragraphs[idx].text[:30]}...'")
+                    logger.debug(f"Applying spacing to paragraph {idx} (length: {len(doc.paragraphs[idx].text)} chars)")
                     self._add_paragraph_spacing(doc.paragraphs[idx])
                     spacing_applied += 1
                 logger.info(f"Applied spacing to {len(paragraphs)} paragraphs")
@@ -1396,7 +1396,7 @@ class FormattingService:
                 logger.debug(f"Sentences identified for spacing: {sentences_to_process[:3]} (showing first 3)")
                 # Process in reversed order to avoid index issues when modifying paragraphs
                 for para_idx, sentences in reversed(sentences_to_process):
-                    logger.debug(f"Applying sentence spacing to paragraph {para_idx} with sentences: {sentences[:3]} (showing first 3)")
+                    logger.debug(f"Applying sentence spacing to paragraph {para_idx} ({len(sentences)} sentences)")
                     self._add_sentence_spacing(doc.paragraphs[para_idx])
                     spacing_applied += 1
                 logger.info(f"Applied spacing to sentences in {len(sentences_to_process)} paragraphs")
@@ -1931,10 +1931,6 @@ class FormattingService:
                 actual_section_num = len(sections) - section_num + 1  # For logging
                 logger.debug(f"Processing section {actual_section_num}/{len(sections)}: paragraphs {start_idx}-{end_idx}")
 
-                # Get the first paragraph of the section to use as title for logging
-                first_para = doc.paragraphs[start_idx].text
-                logger.debug(f"Section starts with: '{first_para[:50]}...'")
-
                 if not section_text.strip():
                     logger.debug(f"Section {start_idx}-{end_idx} has no text, skipping")
                     continue
@@ -1951,7 +1947,7 @@ class FormattingService:
                             use_cache=True
                         )
                         ollama_used = True
-                        logger.debug(f"Ollama extracted keywords: {keywords}")
+                        logger.debug(f"Ollama extracted {len(keywords)} keyword(s)")
                     except Exception as e:
                         logger.warning(f"Ollama keyword extraction failed: {str(e)}. Falling back to spaCy")
                         use_ollama = False  # Disable for remaining sections
@@ -1964,7 +1960,7 @@ class FormattingService:
                         include_proper_nouns=include_proper_nouns
                     )
                     spacy_fallback_used = True
-                    logger.debug(f"spaCy extracted keywords: {keywords}")
+                    logger.debug(f"spaCy extracted {len(keywords)} keyword(s)")
 
                 if keywords:
                     # Detect the section language so the prefix is localised
@@ -1974,7 +1970,7 @@ class FormattingService:
                     # Format keywords using keyword_service
                     # This returns: "<localised label>: keyword1, keyword2, ..."
                     keyword_text = keyword_service.format_keywords(keywords, language=section_language)
-                    logger.debug(f"Formatted keywords for section '{first_para[:30]}...': {keyword_text}")
+                    logger.debug(f"Formatted {len(keywords)} keyword(s) for section {start_idx}-{end_idx}")
 
                     # Insert keyword paragraph right after the section start
                     start_para = doc.paragraphs[start_idx]
@@ -2016,7 +2012,7 @@ class FormattingService:
                     sections_processed += 1
                     total_keywords_extracted += len(keywords)
 
-                    logger.info(f"Added keywords before section '{first_para[:50]}...': {keyword_text}")
+                    logger.info(f"Added {len(keywords)} keyword(s) before section {start_idx}-{end_idx}")
 
             # Save document
             doc.save(output_path)

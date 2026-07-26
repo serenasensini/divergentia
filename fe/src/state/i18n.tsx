@@ -257,13 +257,21 @@ const en = {
   keywords: {
     perSection: 'Keywords per section (1–10)',
     includeNames: 'Include names & places',
-    model: 'AI model (optional)',
-    modelPlaceholder: 'e.g. llama3.2',
     apply: 'Add keywords',
     working: 'Finding keywords…',
     done: 'Keywords added above each section.',
     stepLabel: 'Section keywords',
     stepDetail: 'Up to {n} per section.',
+  },
+  aiModel: {
+    label: 'AI model',
+    tiers: {
+      fast: 'Fast (lighter)',
+      balanced: 'Balanced',
+      advanced: 'Advanced (best quality)',
+    },
+    tooltip:
+      'Choosing a lighter model is faster but less accurate. A heavier, advanced model is slower but gives higher-quality results.',
   },
   highlighting: {
     which: 'Which words to highlight',
@@ -576,13 +584,21 @@ const it: Dict = {
   keywords: {
     perSection: 'Parole chiave per sezione (1–10)',
     includeNames: 'Includi nomi e luoghi',
-    model: 'Modello AI (opzionale)',
-    modelPlaceholder: 'es. llama3.2',
     apply: 'Aggiungi parole chiave',
     working: 'Sto cercando le parole chiave…',
     done: 'Parole chiave aggiunte sopra ogni sezione.',
     stepLabel: 'Parole chiave per sezione',
     stepDetail: 'Fino a {n} per sezione.',
+  },
+  aiModel: {
+    label: 'Modello AI',
+    tiers: {
+      fast: 'Veloce (più leggero)',
+      balanced: 'Bilanciato',
+      advanced: 'Avanzato (qualità migliore)',
+    },
+    tooltip:
+      'Un modello più leggero è più veloce ma meno accurato. Un modello avanzato è più lento ma offre risultati di qualità migliore.',
   },
   highlighting: {
     which: 'Quali parole evidenziare',
