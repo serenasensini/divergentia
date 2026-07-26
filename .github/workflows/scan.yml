@@ -46,161 +46,38 @@ jobs:
             --file "${{ matrix.component.dockerfile }}" \
             --tag "${{ matrix.component.image }}"
 
-      # ─── SCOUT — solo su PR ──────────────────────────────────────────────────
-      - name: Installazione Docker Scout CLI
+      # ─── SCOUT — solo su PR o esecuzione manuale ─────────────────────────────
+      # Usa l'action ufficiale Docker Scout invece della CLI installata a mano:
+      # gestisce da sola autenticazione, filtro per severità, exit-code di
+      # blocco e commento sulla PR con formattazione corretta (evita i bug di
+      # rendering Markdown incontrati parsando a mano il SARIF).
+      # https://github.com/docker/scout-action
+      - name: Docker Scout - Analisi vulnerabilità (${{ matrix.component.name }})
         if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/docker/scout-cli/main/install.sh \
-            -o install-scout.sh
-          sh install-scout.sh
-
-      - name: Autenticazione Docker Scout
-        if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
-        run: |
-          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login \
-            --username "${{ secrets.DOCKERHUB_USER }}" \
-            --password-stdin
-
-      - name: Scansione vulnerabilità con Docker Scout (${{ matrix.component.name }})
-        if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
-        run: |
-          docker scout cves "${{ matrix.component.image }}" \
-            --ignore-base \
-            --format sarif \
-            --output scan-results-${{ matrix.component.name }}.sarif.json
+        uses: docker/scout-action@v1
+        with:
+          command: cves
+          image: ${{ matrix.component.image }}
+          dockerhub-user: ${{ secrets.DOCKERHUB_USER }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+          ignore-base: true
+          only-severities: critical,high
+          exit-code: true
+          sarif-file: scan-results-${{ matrix.component.name }}.sarif.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          write-comment: true
+          summary: true
 
       - name: Carica il report SARIF completo come artifact (${{ matrix.component.name }})
-        if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+        if: >
+          always() &&
+          (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@v4
         with:
           name: scan-results-${{ matrix.component.name }}-${{ github.run_id }}
           path: scan-results-${{ matrix.component.name }}.sarif.json
           retention-days: 14
-
-      # ─── ANALISI RISULTATI ────────────────────────────────────────────────────
-      - name: Verifica vulnerabilità (${{ matrix.component.name }})
-        id: check_vulnerabilities
-        if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
-        run: |
-          FILE="scan-results-${{ matrix.component.name }}.sarif.json"
-          VULN_COUNT=$(jq '.runs[0].results | length' "$FILE")
-
-          # Il merge viene bloccato solo per CRITICAL/HIGH: le vulnerabilità di
-          # severità inferiore (o quelle dei pacchetti di sistema dell'immagine
-          # base non ancora patchate da Debian) sono comunque visibili nel
-          # report/commento ma non fermano la pipeline.
-          # Docker Scout riporta la severità dentro `message.text`
-          # ("Severity   :HIGH"), non in modo affidabile nel campo `level`.
-          HIGH_CRITICAL_COUNT=$(jq '[.runs[0].results[] | select(.message.text | test("Severity\\s*:\\s*(CRITICAL|HIGH)"; "i"))] | length' "$FILE")
-
-          echo "Vulnerabilità trovate (${{ matrix.component.name }}): $VULN_COUNT totali, $HIGH_CRITICAL_COUNT CRITICAL/HIGH"
-          echo "vuln_count=$VULN_COUNT" >> "$GITHUB_OUTPUT"
-          echo "high_critical_count=$HIGH_CRITICAL_COUNT" >> "$GITHUB_OUTPUT"
-
-          if [[ "$HIGH_CRITICAL_COUNT" -gt 0 ]]; then
-            echo "fail_workflow=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "fail_workflow=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Commenta sulla PR con le vulnerabilità CRITICAL/HIGH (${{ matrix.component.name }})
-        if: >
-          github.event_name == 'pull_request' &&
-          steps.check_vulnerabilities.outputs.fail_workflow == 'true'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('fs');
-            const component = '${{ matrix.component.name }}';
-            const image = '${{ matrix.component.image }}';
-            const sarif = JSON.parse(fs.readFileSync(`scan-results-${component}.sarif.json`, 'utf8'));
-            const results = sarif.runs[0].results;
-
-            // Docker Scout's SARIF `message.text` is a multi-line key/value
-            // blob (Vulnerability/Severity/Package/...), not a single
-            // sentence: dumping it as-is into a table cell breaks the
-            // Markdown table (each embedded newline starts a "new row").
-            // Extract the fields we care about and render one clean row per
-            // finding instead.
-            const field = (text, label) => {
-              const m = text.match(new RegExp(`${label}\\s*:\\s*(.+)`));
-              return m ? m[1].trim() : '';
-            };
-            // Belt-and-braces: collapse any stray newline and escape pipes so
-            // a single malformed entry can never break the table layout.
-            const sanitize = (s) => String(s || '').replace(/\r?\n/g, ' ').replace(/\|/g, '\\|').trim();
-
-            // Higher-severity findings must never be silently truncated out of
-            // the table: sort by severity (most critical first) before capping.
-            const SEVERITY_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, UNSPECIFIED: 4, UNKNOWN: 5, NONE: 6 };
-            const severityOf = (r) => {
-              const text = r.message?.text || '';
-              return sanitize(field(text, 'Severity') || r.level || 'unknown').toUpperCase();
-            };
-            const rankOf = (sev) => SEVERITY_RANK[sev] ?? 99;
-
-            const sortedResults = [...results].sort((a, b) => rankOf(severityOf(a)) - rankOf(severityOf(b)));
-
-            const MAX_ROWS = 50;
-            const shown = sortedResults.slice(0, MAX_ROWS);
-
-            const severityCounts = {};
-            for (const r of results) {
-              const sev = severityOf(r);
-              severityCounts[sev] = (severityCounts[sev] || 0) + 1;
-            }
-            const summaryLine = Object.entries(severityCounts)
-              .sort((a, b) => rankOf(a[0]) - rankOf(b[0]))
-              .map(([sev, count]) => `**${sev}**: ${count}`)
-              .join(' · ');
-
-            const rows = shown.map(r => {
-              const text = r.message?.text || '';
-              const cve = sanitize(field(text, 'Vulnerability') || r.ruleId || 'N/A');
-              const severity = sanitize(field(text, 'Severity') || r.level || 'unknown');
-              const pkg = sanitize(field(text, 'Package') || 'N/A');
-              const fixed = sanitize(field(text, 'Fixed version') || 'N/A');
-              return `| \`${cve}\` | ${severity} | \`${pkg}\` | ${fixed} |`;
-            });
-
-            const truncatedNote = results.length > MAX_ROWS
-              ? ` Mostrate le ${MAX_ROWS} vulnerabilità più severe su ${results.length} totali (ordinate per severità): esegui \`docker scout cves ${image}\` localmente per l'elenco completo.`
-              : '';
-
-            const highCriticalCount = results.filter(r => ['CRITICAL', 'HIGH'].includes(severityOf(r))).length;
-
-            const body = [
-              `## ⚠️ Vulnerabilità CRITICAL/HIGH trovate nell'immagine Docker (${component})`,
-              ``,
-              `Docker Scout ha rilevato **${highCriticalCount} vulnerabilità CRITICAL/HIGH** ` +
-                `(su ${results.length} totali) nell'immagine \`${image}\`. Il merge è bloccato ` +
-                `solo per queste severità: le altre restano visibili ma non fermano la pipeline.`,
-              ``,
-              summaryLine,
-              ``,
-              `| CVE | Severità | Pacchetto | Versione corretta |`,
-              `|---|---|---|---|`,
-              ...rows,
-              ``,
-              `> Le vulnerabilità elencate escludono quelle già presenti nell'immagine base (\`--ignore-base\`).${truncatedNote}`,
-              `> Risolvi i problemi e ri-pusha per aggiornare questa analisi.`
-            ].join('\n');
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: body
-            });
-
-      - name: Blocca il workflow se ci sono vulnerabilità CRITICAL/HIGH (${{ matrix.component.name }})
-        if: >
-          (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') &&
-          steps.check_vulnerabilities.outputs.fail_workflow == 'true'
-        run: |
-          echo "::error::Trovate ${{ steps.check_vulnerabilities.outputs.high_critical_count }} vulnerabilità CRITICAL/HIGH (su ${{ steps.check_vulnerabilities.outputs.vuln_count }} totali) nell'immagine ${{ matrix.component.name }}. Il merge è bloccato."
-          exit 1
+          if-no-files-found: warn
 
       # ─── PUSH — solo su merge in main ─────────────────────────────────────────
       # Push disabilitato per il momento: nessun registry di destinazione configurato.
