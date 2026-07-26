@@ -33,6 +33,7 @@ export function UploadScreen({ onUploaded }: { onUploaded?: () => void }) {
   const { setDocument } = useDocument();
 
   const [formats, setFormats] = useState<string[] | null>(null);
+  const [maxUploadSizeBytes, setMaxUploadSizeBytes] = useState<number | null>(null);
   const [phase, setPhase] = useState<UploadPhase>('idle');
   const [message, setMessage] = useState('');
   const [result, setResult] = useState<UploadResponse | null>(null);
@@ -44,7 +45,11 @@ export function UploadScreen({ onUploaded }: { onUploaded?: () => void }) {
     apiClient
       .supportedFormats()
       .then((res) => {
-        if (active) setFormats(res.supported_formats.map((f) => f.toLowerCase()));
+        if (!active) return;
+        setFormats(res.supported_formats.map((f) => f.toLowerCase()));
+        if (typeof res.max_upload_size_bytes === 'number') {
+          setMaxUploadSizeBytes(res.max_upload_size_bytes);
+        }
       })
       .catch(() => {
         // Non-fatal: we can still attempt an upload; the server re-validates.
@@ -65,6 +70,19 @@ export function UploadScreen({ onUploaded }: { onUploaded?: () => void }) {
           t('upload.unsupported', {
             ext,
             list: formats.map((f) => `.${f}`).join(', '),
+          }),
+        );
+        return;
+      }
+
+      if (maxUploadSizeBytes && file.size > maxUploadSizeBytes) {
+        setPhase('error');
+        setResult(null);
+        setMessage(
+          t('upload.tooLarge', {
+            name: file.name,
+            size: humanSize(file.size),
+            max: humanSize(maxUploadSizeBytes),
           }),
         );
         return;
@@ -93,7 +111,7 @@ export function UploadScreen({ onUploaded }: { onUploaded?: () => void }) {
         setMessage(detail);
       }
     },
-    [formats, setDocument, t],
+    [formats, maxUploadSizeBytes, setDocument, t],
   );
 
   const onDrop = useCallback(
@@ -169,6 +187,12 @@ export function UploadScreen({ onUploaded }: { onUploaded?: () => void }) {
             {t('upload.supported', {
               list: formats.map((f) => `.${f}`).join(', '),
             })}
+            {maxUploadSizeBytes && (
+              <>
+                {' '}
+                {t('upload.maxSize', { size: humanSize(maxUploadSizeBytes) })}
+              </>
+            )}
           </p>
         )}
       </div>

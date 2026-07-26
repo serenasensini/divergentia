@@ -177,6 +177,13 @@ class SummarizeRequestSchema(BaseModel):
         description="Insert the summary at the top of the document, after the "
                     "title and before the body content"
     )
+    model: Optional[str] = Field(
+        None,
+        description="Optional Ollama model tag to use for this request (e.g. "
+                    "an FE 'AI model tier' reference model such as "
+                    "'llama3.2:1b'). Falls back to the server's configured "
+                    "default model when omitted."
+    )
 
     @validator('summary_type')
     def validate_summary_type(cls, v):
@@ -196,6 +203,13 @@ class ParaphraseRequestSchema(BaseModel):
         description="Apply the paraphrase to the document body (rewriting the "
                     "content in place) and produce a new processed version"
     )
+    model: Optional[str] = Field(
+        None,
+        description="Optional Ollama model tag to use for this request (e.g. "
+                    "an FE 'AI model tier' reference model such as "
+                    "'llama3.2:1b'). Falls back to the server's configured "
+                    "default model when omitted."
+    )
 
     @validator('style')
     def validate_style(cls, v):
@@ -210,12 +224,14 @@ class TextSummarizeRequestSchema(BaseModel):
     """Schema for direct text summarization"""
     text: str = Field(..., min_length=10, description="Text to summarize")
     max_length: Optional[int] = Field(500, ge=50, le=2000, description="Maximum summary length")
+    model: Optional[str] = Field(None, description="Optional Ollama model tag to use for this request")
 
 
 class TextParaphraseRequestSchema(BaseModel):
     """Schema for direct text paraphrasing"""
     text: str = Field(..., min_length=10, description="Text to paraphrase")
     style: Optional[str] = Field('simple', description="Paraphrasing style")
+    model: Optional[str] = Field(None, description="Optional Ollama model tag to use for this request")
 
     @validator('style')
     def validate_style(cls, v):

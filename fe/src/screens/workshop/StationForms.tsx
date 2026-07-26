@@ -13,6 +13,41 @@ import { useDocument } from '../../state/document';
 import { useI18n } from '../../state/i18n';
 import { useStationRunner, type RunPhase } from '../../state/useStationRunner';
 import { Tooltip } from '../../components/Tooltip';
+import { usePreferences } from '../../state/preferences';
+import { AI_MODEL_TIERS, resolveAiModel, type AiModelTier } from '../../state/aiModels';
+
+/**
+ * Shared AI model tier selector used by every Ollama-backed station
+ * (keywords, summarise, rephrase). The user picks a friendly tier label —
+ * never a raw model name — and the choice is persisted as a preference so it
+ * carries over between stations (see issue #22).
+ */
+function AiModelTierField({ idPrefix }: { idPrefix: string }) {
+  const { t } = useI18n();
+  const { preferences, setPreference } = usePreferences();
+  const fieldId = `${idPrefix}-ai-model`;
+  return (
+    <div className="field">
+      <label htmlFor={fieldId} className="field__label-row">
+        {t('aiModel.label')}
+        <Tooltip label={t('aiModel.label')} content={t('aiModel.tooltip')} />
+      </label>
+      <select
+        id={fieldId}
+        value={preferences.aiModel}
+        onChange={(e) =>
+          setPreference('aiModel', e.target.value as AiModelTier)
+        }
+      >
+        {AI_MODEL_TIERS.map((tier) => (
+          <option key={tier} value={tier}>
+            {t(`aiModel.tiers.${tier}`)}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
 export interface StationProps {
   documentId: string;
   onApplied: () => void;
@@ -257,7 +292,7 @@ export function FramingStation({ documentId, onApplied }: StationProps) {
         >
           {['single', 'double', 'dashed', 'dotted', 'thick'].map((s) => (
             <option key={s} value={s}>
-              {s}
+              {t(`framing.borderStyles.${s}`)}
             </option>
           ))}
         </select>
@@ -364,9 +399,9 @@ export function KeywordsStation({ documentId, onApplied }: StationProps) {
   const { t } = useI18n();
   const { addStep } = useDocument();
   const { phase, message, run } = useStationRunner();
+  const { preferences } = usePreferences();
   const [maxKeywords, setMaxKeywords] = useState(5);
   const [includeProperNouns, setIncludeProperNouns] = useState(true);
-  const [model, setModel] = useState('');
   const [fromOriginal, setFromOriginal] = useState(false);
   return (
     <form
@@ -377,7 +412,7 @@ export function KeywordsStation({ documentId, onApplied }: StationProps) {
             await apiClient.applyKeywords(documentId, {
               max_keywords: maxKeywords,
               include_proper_nouns: includeProperNouns,
-              model: model.trim() || undefined,
+              model: resolveAiModel(preferences.aiModel),
               from_original: fromOriginal,
             });
             addStep(
@@ -411,16 +446,7 @@ export function KeywordsStation({ documentId, onApplied }: StationProps) {
         />
         <label htmlFor="kw-proper">{t('keywords.includeNames')}</label>
       </div>
-      <div className="field">
-        <label htmlFor="kw-model">{t('keywords.model')}</label>
-        <input
-          id="kw-model"
-          type="text"
-          placeholder={t('keywords.modelPlaceholder')}
-          value={model}
-          onChange={(e) => setModel(e.target.value)}
-        />
-      </div>
+      <AiModelTierField idPrefix="kw" />
       <FromOriginalToggle
         id="kw-from-original"
         checked={fromOriginal}
@@ -530,6 +556,7 @@ export function SummarizeStation({ documentId, onApplied }: StationProps) {
   const { t } = useI18n();
   const { addStep } = useDocument();
   const { phase, message, run } = useStationRunner();
+  const { preferences } = usePreferences();
   const [summaryType, setSummaryType] = useState<SummaryType>('brief');
   const [addToDocument, setAddToDocument] = useState(false);
   const [result, setResult] = useState<SummarizeResponse | null>(null);
@@ -543,6 +570,7 @@ export function SummarizeStation({ documentId, onApplied }: StationProps) {
               documentId,
               summaryType,
               addToDocument,
+              resolveAiModel(preferences.aiModel),
             );
             setResult(res);
             addStep(
@@ -559,6 +587,7 @@ export function SummarizeStation({ documentId, onApplied }: StationProps) {
       }}
     >
       <p className="station__hint">{t('summarize.hint')}</p>
+      <AiModelTierField idPrefix="sum" />
       <div className="field">
         <label htmlFor="sum-type">{t('summarize.length')}</label>
         <select
@@ -613,6 +642,7 @@ export function ParaphraseStation({ documentId, onApplied }: StationProps) {
   const { t } = useI18n();
   const { addStep } = useDocument();
   const { phase, message, run } = useStationRunner();
+  const { preferences } = usePreferences();
   const [style, setStyle] = useState<ParaphraseStyle>('simple');
   const [applyToDocument, setApplyToDocument] = useState(false);
   const [result, setResult] = useState<ParaphraseResponse | null>(null);
@@ -626,6 +656,7 @@ export function ParaphraseStation({ documentId, onApplied }: StationProps) {
               documentId,
               style,
               applyToDocument,
+              resolveAiModel(preferences.aiModel),
             );
             setResult(res);
             addStep(
@@ -642,6 +673,7 @@ export function ParaphraseStation({ documentId, onApplied }: StationProps) {
       }}
     >
       <p className="station__hint">{t('paraphrase.hint')}</p>
+      <AiModelTierField idPrefix="par" />
       <div className="field">
         <label htmlFor="par-style">{t('paraphrase.style')}</label>
         <select

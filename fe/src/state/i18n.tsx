@@ -118,10 +118,13 @@ const en = {
     chooseAria: 'Choose a document to upload',
     uploading: 'Uploading…',
     supported: 'Supported: {list}',
+    maxSize: 'Maximum size: {size}',
     uploadingFile: 'Uploading "{name}"…',
     done: '"{name}" is on the desk ({size}). You\'re ready to start.',
     unsupported:
       'Sorry, ".{ext}" files aren\'t supported yet. Try: {list}.',
+    tooLarge:
+      '"{name}" is too large ({size}). The maximum allowed size is {max}.',
     genericError: 'Something went wrong while uploading. Please try again.',
     resultName: 'Name',
     resultType: 'Type',
@@ -233,6 +236,13 @@ const en = {
       subparagraphs: 'Sub-paragraphs',
       sentences: 'Each sentence',
     },
+    borderStyles: {
+      single: 'Single line',
+      double: 'Double line',
+      dashed: 'Dashed',
+      dotted: 'Dotted',
+      thick: 'Thick line',
+    },
   },
   spacing: {
     where: 'Where to add space',
@@ -247,13 +257,21 @@ const en = {
   keywords: {
     perSection: 'Keywords per section (1–10)',
     includeNames: 'Include names & places',
-    model: 'AI model (optional)',
-    modelPlaceholder: 'e.g. llama3.2',
     apply: 'Add keywords',
     working: 'Finding keywords…',
     done: 'Keywords added above each section.',
     stepLabel: 'Section keywords',
     stepDetail: 'Up to {n} per section.',
+  },
+  aiModel: {
+    label: 'AI model',
+    tiers: {
+      fast: 'Fast (lighter)',
+      balanced: 'Balanced',
+      advanced: 'Advanced (best quality)',
+    },
+    tooltip:
+      'Choosing a lighter model is faster but less accurate. A heavier, advanced model is slower but gives higher-quality results.',
   },
   highlighting: {
     which: 'Which words to highlight',
@@ -426,10 +444,13 @@ const it: Dict = {
     chooseAria: 'Scegli un documento da caricare',
     uploading: 'Caricamento…',
     supported: 'Supportati: {list}',
+    maxSize: 'Dimensione massima: {size}',
     uploadingFile: 'Caricamento di "{name}"…',
     done: '"{name}" è sulla scrivania ({size}). Puoi iniziare.',
     unsupported:
       'Spiacente, i file ".{ext}" non sono ancora supportati. Prova: {list}.',
+    tooLarge:
+      '"{name}" è troppo grande ({size}). La dimensione massima consentita è {max}.',
     genericError: 'Qualcosa è andato storto durante il caricamento. Riprova.',
     resultName: 'Nome',
     resultType: 'Tipo',
@@ -542,6 +563,13 @@ const it: Dict = {
       subparagraphs: 'Sotto-paragrafi',
       sentences: 'Ogni frase',
     },
+    borderStyles: {
+      single: 'Linea singola',
+      double: 'Linea doppia',
+      dashed: 'Tratteggiato',
+      dotted: 'Punteggiato',
+      thick: 'Linea spessa',
+    },
   },
   spacing: {
     where: 'Dove aggiungere spazio',
@@ -556,13 +584,21 @@ const it: Dict = {
   keywords: {
     perSection: 'Parole chiave per sezione (1–10)',
     includeNames: 'Includi nomi e luoghi',
-    model: 'Modello AI (opzionale)',
-    modelPlaceholder: 'es. llama3.2',
     apply: 'Aggiungi parole chiave',
     working: 'Sto cercando le parole chiave…',
     done: 'Parole chiave aggiunte sopra ogni sezione.',
     stepLabel: 'Parole chiave per sezione',
     stepDetail: 'Fino a {n} per sezione.',
+  },
+  aiModel: {
+    label: 'Modello AI',
+    tiers: {
+      fast: 'Veloce (più leggero)',
+      balanced: 'Bilanciato',
+      advanced: 'Avanzato (qualità migliore)',
+    },
+    tooltip:
+      'Un modello più leggero è più veloce ma meno accurato. Un modello avanzato è più lento ma offre risultati di qualità migliore.',
   },
   highlighting: {
     which: 'Quali parole evidenziare',

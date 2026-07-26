@@ -3,6 +3,7 @@ Document Formatting Service - Handle document style modifications
 """
 import logging
 import re
+from copy import deepcopy
 from typing import Dict, Any, Optional, List, Tuple, Set
 from pathlib import Path
 
@@ -958,9 +959,28 @@ class FormattingService:
                 for run in paragraph.runs:
                     run.font.color.rgb = RGBColor(*color_rgb)
                 colored += 1
-                logger.debug(f"Colored textbox caption: '{paragraph.text[:50]}...'")
+                logger.debug(f"Colored textbox caption (length: {len(paragraph.text)} chars)")
         logger.info(f"Colored {colored} textbox caption paragraph(s)")
         return colored
+
+    def _iter_table_cell_paragraphs(self, doc: Document) -> List[Paragraph]:
+        """
+        Return every paragraph nested inside a table cell, across all
+        top-level tables in the document body (in document order).
+
+        Framing (:meth:`apply_framing`) moves paragraphs into single-cell
+        tables to draw a box around them; that content is no longer reachable
+        via ``doc.paragraphs`` (which only lists top-level body paragraphs),
+        even though it is still real, editable body content. This helper lets
+        structural text operations (e.g. POS highlighting) keep reaching that
+        content after it has been framed, instead of silently skipping it.
+        """
+        paragraphs: List[Paragraph] = []
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    paragraphs.extend(cell.paragraphs)
+        return paragraphs
 
     def _add_paragraph_border(self, paragraph) -> None:
         """
@@ -1092,7 +1112,7 @@ class FormattingService:
         from app.services.keyword_service import get_keyword_service
 
         text = paragraph.text
-        logger.debug(f"Adding sentence spacing to paragraph: '{text[:50]}...'")
+        logger.debug(f"Adding sentence spacing to paragraph (length: {len(text)} chars)")
 
         if not text.strip():
             return
@@ -1154,7 +1174,7 @@ class FormattingService:
 
         logger.info(f"Identified {len(sections)} sections")
         for idx, (start, end, text) in enumerate(sections):
-            logger.debug(f"Section {idx}: paragraphs {start}-{end}, text preview: '{text[:100]}...'")
+            logger.debug(f"Section {idx}: paragraphs {start}-{end}, length: {len(text)} chars")
 
         return sections
 
@@ -1179,7 +1199,7 @@ class FormattingService:
 
         logger.info(f"Identified {len(paragraphs)} paragraphs (text following section headings)")
         if paragraphs:
-            logger.debug(f"Example of identified paragraphs: {[doc.paragraphs[i].text[:30] for i in paragraphs[:3]]}")
+            logger.debug(f"Example identified paragraph indices: {paragraphs[:3]}")
         return paragraphs
 
     def _identify_subparagraphs(self, doc: Document, structure: Optional[DocumentStructure] = None) -> List[Tuple[int, List[int]]]:
@@ -1365,7 +1385,7 @@ class FormattingService:
                 logging.debug(f"Identifying PARAGRAPHS for spacing application")
                 paragraphs = self._identify_paragraphs(doc, structure)
                 for idx in paragraphs:
-                    logger.debug(f"Applying spacing to paragraph {idx}: '{doc.paragraphs[idx].text[:30]}...'")
+                    logger.debug(f"Applying spacing to paragraph {idx} (length: {len(doc.paragraphs[idx].text)} chars)")
                     self._add_paragraph_spacing(doc.paragraphs[idx])
                     spacing_applied += 1
                 logger.info(f"Applied spacing to {len(paragraphs)} paragraphs")
@@ -1376,7 +1396,7 @@ class FormattingService:
                 logger.debug(f"Sentences identified for spacing: {sentences_to_process[:3]} (showing first 3)")
                 # Process in reversed order to avoid index issues when modifying paragraphs
                 for para_idx, sentences in reversed(sentences_to_process):
-                    logger.debug(f"Applying sentence spacing to paragraph {para_idx} with sentences: {sentences[:3]} (showing first 3)")
+                    logger.debug(f"Applying sentence spacing to paragraph {para_idx} ({len(sentences)} sentences)")
                     self._add_sentence_spacing(doc.paragraphs[para_idx])
                     spacing_applied += 1
                 logger.info(f"Applied spacing to sentences in {len(sentences_to_process)} paragraphs")
@@ -1542,7 +1562,10 @@ class FormattingService:
 
         Each part is framed with its own table unit:
         - ``sections``  -> one table wrapping all paragraphs of the section,
-        - ``paragraphs``/``subparagraphs`` -> one table per paragraph,
+        - ``paragraphs``/``subparagraphs`` -> one table per paragraph, except
+          that a contiguous run of list items (bulleted/numbered) under
+          ``paragraphs`` is grouped into a single table for the whole list
+          (rather than one table per list row/item),
         - ``sentences`` -> one table per sentence.
 
         Every table is followed by an empty paragraph so adjacent tables are not
@@ -1581,10 +1604,35 @@ class FormattingService:
         if framing_options.get('paragraphs', False):
             paragraphs = self._identify_paragraphs(doc, structure)
             logger.info(f"Identified {len(paragraphs)} paragraphs to frame")
+
+            # Contiguous list items (bulleted/numbered) are grouped into a
+            # single 'list' operation so the whole list is framed as one box
+            # instead of one table per row/item.
+            list_run: List = []
+            list_run_last_idx: Optional[int] = None
+
+            def _flush_list_run():
+                nonlocal list_run, list_run_last_idx
+                if list_run:
+                    operations.append(('list', list(list_run)))
+                    list_run = []
+                list_run_last_idx = None
+
             for idx in paragraphs:
                 para = doc.paragraphs[idx]
-                if _take(para):
-                    operations.append(('paragraph', [para]))
+                if self._is_list_paragraph(para):
+                    if list_run and idx != list_run_last_idx + 1:
+                        # Gap between list items (non-list content in between):
+                        # close the current run before starting a new one.
+                        _flush_list_run()
+                    if _take(para):
+                        list_run.append(para)
+                        list_run_last_idx = idx
+                else:
+                    _flush_list_run()
+                    if _take(para):
+                        operations.append(('paragraph', [para]))
+            _flush_list_run()
 
         if framing_options.get('subparagraphs', False):
             subparagraphs = self._identify_subparagraphs(doc, structure)
@@ -1633,6 +1681,14 @@ class FormattingService:
                         preserve_spacing=preserve_spacing,
                     )
                 elif kind == 'paragraph':
+                    style, width = borders_for(self.PARAGRAPH_BORDER_STYLE, self.PARAGRAPH_BORDER_WIDTH)
+                    self._encapsulate_paragraphs_in_table(
+                        payload, doc, border_width=width, border_color=border_color,
+                        border_style=style, cell_margin=cell_margin,
+                        preserve_spacing=preserve_spacing,
+                    )
+                elif kind == 'list':
+                    # A contiguous run of list items framed as a single box.
                     style, width = borders_for(self.PARAGRAPH_BORDER_STYLE, self.PARAGRAPH_BORDER_WIDTH)
                     self._encapsulate_paragraphs_in_table(
                         payload, doc, border_width=width, border_color=border_color,
@@ -1875,10 +1931,6 @@ class FormattingService:
                 actual_section_num = len(sections) - section_num + 1  # For logging
                 logger.debug(f"Processing section {actual_section_num}/{len(sections)}: paragraphs {start_idx}-{end_idx}")
 
-                # Get the first paragraph of the section to use as title for logging
-                first_para = doc.paragraphs[start_idx].text
-                logger.debug(f"Section starts with: '{first_para[:50]}...'")
-
                 if not section_text.strip():
                     logger.debug(f"Section {start_idx}-{end_idx} has no text, skipping")
                     continue
@@ -1895,7 +1947,7 @@ class FormattingService:
                             use_cache=True
                         )
                         ollama_used = True
-                        logger.debug(f"Ollama extracted keywords: {keywords}")
+                        logger.debug(f"Ollama extracted {len(keywords)} keyword(s)")
                     except Exception as e:
                         logger.warning(f"Ollama keyword extraction failed: {str(e)}. Falling back to spaCy")
                         use_ollama = False  # Disable for remaining sections
@@ -1908,7 +1960,7 @@ class FormattingService:
                         include_proper_nouns=include_proper_nouns
                     )
                     spacy_fallback_used = True
-                    logger.debug(f"spaCy extracted keywords: {keywords}")
+                    logger.debug(f"spaCy extracted {len(keywords)} keyword(s)")
 
                 if keywords:
                     # Detect the section language so the prefix is localised
@@ -1918,7 +1970,7 @@ class FormattingService:
                     # Format keywords using keyword_service
                     # This returns: "<localised label>: keyword1, keyword2, ..."
                     keyword_text = keyword_service.format_keywords(keywords, language=section_language)
-                    logger.debug(f"Formatted keywords for section '{first_para[:30]}...': {keyword_text}")
+                    logger.debug(f"Formatted {len(keywords)} keyword(s) for section {start_idx}-{end_idx}")
 
                     # Insert keyword paragraph right after the section start
                     start_para = doc.paragraphs[start_idx]
@@ -1960,7 +2012,7 @@ class FormattingService:
                     sections_processed += 1
                     total_keywords_extracted += len(keywords)
 
-                    logger.info(f"Added keywords before section '{first_para[:50]}...': {keyword_text}")
+                    logger.info(f"Added {len(keywords)} keyword(s) before section {start_idx}-{end_idx}")
 
             # Save document
             doc.save(output_path)
@@ -1989,6 +2041,232 @@ class FormattingService:
             logger.error(f"DOCX keyword extraction error: {str(e)}")
             raise FormattingException(f"DOCX keyword extraction failed: {str(e)}")
 
+    def _highlight_paragraph_pos(
+        self,
+        paragraph,
+        keyword_service,
+        r: int,
+        g: int,
+        b: int,
+        font_family: Optional[str],
+        font_size: Optional[int],
+        apply_bold: bool,
+        apply_italic: bool,
+        apply_underline: bool,
+        highlight_nouns: bool,
+        highlight_verbs: bool,
+        highlight_adjectives: bool,
+        highlight_adverbs: bool,
+        pos_stats: Dict[str, int],
+    ) -> Tuple[bool, int]:
+        """
+        Apply POS-based highlighting to a single paragraph, in place.
+
+        Extracted so the same logic can be reused both for top-level content
+        paragraphs and for paragraphs that live inside a table cell (e.g. a
+        block already wrapped in a 1x1 "framing" table).
+
+        Args:
+            paragraph: python-docx paragraph object to analyse and rewrite.
+            keyword_service: KeywordService instance used for POS analysis.
+            r, g, b: RGB components of the highlight color.
+            font_family, font_size: Optional font overrides for highlighted runs.
+            apply_bold, apply_italic, apply_underline: Style flags for highlighted runs.
+            highlight_nouns, highlight_verbs, highlight_adjectives, highlight_adverbs:
+                Which parts of speech to highlight.
+            pos_stats: Running totals dict, mutated in place.
+
+        Returns:
+            Tuple of ``(processed, words_formatted)``: ``processed`` is False
+            for paragraphs that were skipped entirely (empty, keyword-prefix,
+            or containing complex fields); ``words_formatted`` is the number
+            of newly-highlighted words in this paragraph.
+        """
+        text = paragraph.text
+        if not text.strip():
+            return False, 0
+
+        # Skip paragraphs starting with "Parole chiave" (inserted by the
+        # keyword-extraction feature).
+        if text.strip().startswith("Parole chiave"):
+            return False, 0
+
+        # CRITICAL: Skip paragraphs that contain complex fields (citations/references)
+        # Processing paragraphs with fields can cause them to be moved or corrupted
+        paragraph_has_complex_field = False
+        for run in paragraph.runs:
+            if run._element is not None:
+                for child in run._element:
+                    tag_name = child.tag
+                    if 'fldChar' in tag_name or 'instrText' in tag_name or 'fldData' in tag_name:
+                        paragraph_has_complex_field = True
+                        break
+                if paragraph_has_complex_field:
+                    break
+
+        if paragraph_has_complex_field:
+            return False, 0
+
+        # Analyze text with spaCy
+        tokens = keyword_service.analyze_pos(text)
+        if not tokens:
+            return True, 0
+
+        # Store paragraph-level formatting
+        original_style = paragraph.style
+        original_alignment = paragraph.alignment
+
+        # Build a map of character positions to format decisions
+        # Map directly from tokens with POS decisions
+        char_format_decisions = {}
+        words_formatted = 0
+
+        for token in tokens:
+            # Skip punctuation and spaces
+            if token['is_punct'] or token['is_space']:
+                continue
+
+            token_start = token.get('start_char', 0)
+            token_end = token.get('end_char', 0)
+            pos = token['pos']
+
+            # Determine if this token should be formatted based on its POS
+            should_format = False
+            if highlight_nouns and pos in ['NOUN', 'PROPN']:
+                should_format = True
+                pos_stats['nouns'] += 1
+            elif highlight_verbs and pos == 'VERB':
+                should_format = True
+                pos_stats['verbs'] += 1
+            elif highlight_adjectives and pos == 'ADJ':
+                should_format = True
+                pos_stats['adjectives'] += 1
+            elif highlight_adverbs and pos == 'ADV':
+                should_format = True
+                pos_stats['adverbs'] += 1
+
+            # Mark all characters in this token with the formatting decision
+            if should_format:
+                words_formatted += 1
+                for char_pos in range(token_start, token_end):
+                    char_format_decisions[char_pos] = True
+
+        # Build a list of runs with metadata about what to do with each
+        runs_info = []
+        current_char_pos = 0
+
+        for run in paragraph.runs:
+            run_text = run.text
+            run_length = len(run_text)
+
+            # Check if this run contains complex field elements (citations, references)
+            has_complex_field = False
+            if run._element is not None:
+                for child in run._element:
+                    tag_name = child.tag
+                    if 'fldChar' in tag_name or 'instrText' in tag_name or 'fldData' in tag_name:
+                        has_complex_field = True
+                        break
+
+            # Store run info
+            runs_info.append({
+                'run': run,
+                'element': run._element,  # Keep reference to original element
+                'start_pos': current_char_pos,
+                'end_pos': current_char_pos + run_length,
+                'text': run_text,
+                'has_complex_field': has_complex_field,
+                'original_formatting': {
+                    'font_name': run.font.name,
+                    'font_size': run.font.size,
+                    'font_color': run.font.color.rgb if run.font.color.rgb else None,
+                    'bold': run.bold,
+                    'italic': run.italic,
+                    'underline': run.underline
+                }
+            })
+
+            current_char_pos += run_length
+
+        # Get paragraph element for manipulating XML
+        paragraph_element = paragraph._element
+
+        # First, remove all existing runs from the paragraph
+        for run in paragraph.runs:
+            run._element.getparent().remove(run._element)
+
+        # Now rebuild runs in the correct order
+        for run_info in runs_info:
+            # If this run has complex fields, reinsert the original element
+            if run_info['has_complex_field']:
+                logger.debug(f"Preserving run with complex field (citation/reference)")
+                paragraph_element.append(run_info['element'])
+                continue
+
+            run_start = run_info['start_pos']
+            run_text = run_info['text']
+            orig_fmt = run_info['original_formatting']
+
+            if not run_text:
+                # Empty run, skip it
+                continue
+
+            # Split this run into segments based on char_format_decisions
+            char_idx = 0
+            while char_idx < len(run_text):
+                char_pos = run_start + char_idx
+                should_format_segment = char_format_decisions.get(char_pos, False)
+
+                # Find the end of this segment (consecutive chars with same decision)
+                segment_start = char_idx
+                while (char_idx < len(run_text) and
+                       char_format_decisions.get(run_start + char_idx, False) == should_format_segment):
+                    char_idx += 1
+
+                # Create a new run element for this segment
+                segment_text = run_text[segment_start:char_idx]
+
+                # Use paragraph.add_run which adds to the end (which maintains order since we process sequentially)
+                new_run = paragraph.add_run(segment_text)
+
+                # Apply original formatting
+                if orig_fmt['font_name']:
+                    new_run.font.name = orig_fmt['font_name']
+                if orig_fmt['font_size']:
+                    new_run.font.size = orig_fmt['font_size']
+                if orig_fmt['font_color']:
+                    new_run.font.color.rgb = orig_fmt['font_color']
+                if orig_fmt['bold'] is not None:
+                    new_run.bold = orig_fmt['bold']
+                if orig_fmt['italic'] is not None:
+                    new_run.italic = orig_fmt['italic']
+                if orig_fmt['underline'] is not None:
+                    new_run.underline = orig_fmt['underline']
+
+                # Apply new formatting if this segment should be formatted
+                if should_format_segment:
+                    new_run.font.color.rgb = RGBColor(r, g, b)
+
+                    if font_family:
+                        new_run.font.name = font_family
+
+                    if font_size:
+                        new_run.font.size = Pt(font_size)
+
+                    if apply_bold:
+                        new_run.bold = True
+                    if apply_italic:
+                        new_run.italic = True
+                    if apply_underline:
+                        new_run.underline = True
+
+        # Restore paragraph formatting
+        paragraph.style = original_style
+        if original_alignment:
+            paragraph.alignment = original_alignment
+
+        return True, words_formatted
+
     def _apply_highlighting_docx(
         self,
         input_path: str,
@@ -2001,6 +2279,17 @@ class FormattingService:
         This method processes each paragraph in the document, analyzes the text using spaCy
         to identify parts of speech, and applies formatting (color, font, style) based on
         user-specified options.
+
+        Paragraphs are gathered from two places so highlighting keeps working
+        even after other operations have changed the document's shape:
+        - top-level content paragraphs (``doc.paragraphs``), scoped to the
+          identified sections when the document has headings, or to every
+          content paragraph otherwise (e.g. a document with no headings at
+          all, or one whose headings survived a previous ``apply_framing``
+          call but whose body was moved into tables);
+        - paragraphs nested inside single-cell "framing" tables, which are no
+          longer part of ``doc.paragraphs`` once ``apply_framing`` has wrapped
+          them in a box, but are still real, user-visible body content.
 
         Args:
             input_path: Path to input DOCX file
@@ -2042,21 +2331,6 @@ class FormattingService:
 
             # Get keyword service for POS analysis
             keyword_service = get_keyword_service()
-
-            # Identify sections (this excludes headings)
-            sections = self._identify_sections(doc, structure)
-
-            if not sections:
-                logger.warning("No sections found in document. Nothing to format.")
-                return {
-                    'success': True,
-                    'output_path': output_path,
-                    'format': 'docx',
-                    'words_formatted': 0,
-                    'paragraphs_processed': 0,
-                    'pos_stats': {'nouns': 0, 'verbs': 0, 'adjectives': 0, 'adverbs': 0},
-                    'highlighting_options': highlighting_options
-                }
 
             # Extract options
             color = highlighting_options.get('color', self.DEFAULT_HIGHLIGHT_COLOR).lstrip('#')
@@ -2101,217 +2375,66 @@ class FormattingService:
             logger.info(f"Font settings - Family: {font_family}, Size: {font_size}, Styles: bold={apply_bold}, italic={apply_italic}, underline={apply_underline}")
             logger.info(f"POS to format - Nouns: {highlight_nouns}, Verbs: {highlight_verbs}, "
                        f"Adjectives: {highlight_adjectives}, Adverbs: {highlight_adverbs}")
-            logger.info(f"Found {len(sections)} sections to process")
 
-            # Build a set of paragraph indices that are part of sections (not headings)
-            section_paragraph_indices = set()
-            for start_idx, end_idx, _ in sections:
-                for i in range(start_idx, end_idx + 1):
-                    section_paragraph_indices.add(i)
+            # Identify sections (this excludes headings). When no sections are
+            # found (no headings at all, or headings whose body content was
+            # already moved into framing tables) fall back to every top-level
+            # content paragraph instead of silently doing nothing.
+            sections = self._identify_sections(doc, structure)
+            if sections:
+                target_indices: Set[int] = set()
+                for start_idx, end_idx, _ in sections:
+                    target_indices.update(range(start_idx, end_idx + 1))
+                logger.info(f"Found {len(sections)} sections to process "
+                            f"({len(target_indices)} paragraphs)")
+            else:
+                target_indices = set(self._identify_paragraphs(doc, structure))
+                logger.warning(
+                    "No sections identified; falling back to all top-level "
+                    f"content paragraphs ({len(target_indices)})"
+                )
 
-            logger.info(f"Processing {len(section_paragraph_indices)} paragraphs (excluding headings)")
+            # Process top-level paragraphs that belong to the target set.
+            for para_idx in sorted(target_indices):
+                paragraph = doc.paragraphs[para_idx]
 
-            # Process only paragraphs that are part of sections
-            for para_idx, paragraph in enumerate(doc.paragraphs):
-                # Skip if this paragraph is not part of a section (it's likely a heading)
-                if para_idx not in section_paragraph_indices:
-                    logger.debug(f"Skipping paragraph {para_idx} (heading or non-section content)")
-                    continue
-
-                # IMPORTANT: Also skip if this paragraph IS a heading (title)
-                # Even if it's in section_paragraph_indices, headings should not be processed
+                # Headings should never be highlighted, even if they ended up
+                # in the target set for any reason.
                 if structure.is_heading(para_idx):
                     logger.debug(f"Skipping paragraph {para_idx} (is a heading)")
                     continue
 
-                # Skip paragraphs starting with "Parole chiave"
-                if paragraph.text.strip().startswith("Parole chiave"):
-                    logger.debug(f"Skipping paragraph {para_idx} (starts with 'Parole chiave')")
-                    continue
+                processed, added_words = self._highlight_paragraph_pos(
+                    paragraph, keyword_service, r, g, b, font_family, font_size,
+                    apply_bold, apply_italic, apply_underline,
+                    highlight_nouns, highlight_verbs, highlight_adjectives, highlight_adverbs,
+                    pos_stats,
+                )
+                if processed:
+                    paragraphs_processed += 1
+                    words_formatted += added_words
 
-                if not paragraph.text.strip():
-                    continue
+            # Paragraphs already moved inside single-cell "framing" tables are
+            # no longer part of doc.paragraphs, but are still real body
+            # content the user expects highlighting to reach.
+            table_paragraphs = self._iter_table_cell_paragraphs(doc)
+            if table_paragraphs:
+                logger.info(f"Also processing {len(table_paragraphs)} paragraph(s) "
+                            f"found inside framed (table) content")
+            for paragraph in table_paragraphs:
+                processed, added_words = self._highlight_paragraph_pos(
+                    paragraph, keyword_service, r, g, b, font_family, font_size,
+                    apply_bold, apply_italic, apply_underline,
+                    highlight_nouns, highlight_verbs, highlight_adjectives, highlight_adverbs,
+                    pos_stats,
+                )
+                if processed:
+                    paragraphs_processed += 1
+                    words_formatted += added_words
 
-                # CRITICAL: Skip paragraphs that contain complex fields (citations/references)
-                # Processing paragraphs with fields can cause them to be moved or corrupted
-                paragraph_has_complex_field = False
-                for run in paragraph.runs:
-                    if run._element is not None:
-                        for child in run._element:
-                            tag_name = child.tag
-                            if 'fldChar' in tag_name or 'instrText' in tag_name or 'fldData' in tag_name:
-                                paragraph_has_complex_field = True
-                                break
-                        if paragraph_has_complex_field:
-                            break
-
-                if paragraph_has_complex_field:
-                    logger.debug(f"Skipping paragraph {para_idx} (contains citation/reference fields)")
-                    continue
-
-                paragraphs_processed += 1
-
-                # Analyze text with spaCy
-                tokens = keyword_service.analyze_pos(paragraph.text)
-
-                if not tokens:
-                    continue
-
-                # Store paragraph-level formatting
-                original_style = paragraph.style
-                original_alignment = paragraph.alignment
-
-
-                # Build a map of character positions to format decisions
-                # Map directly from tokens with POS decisions
-                char_format_decisions = {}
-
-                for token in tokens:
-                    # Skip punctuation and spaces
-                    if token['is_punct'] or token['is_space']:
-                        continue
-
-                    token_start = token.get('start_char', 0)
-                    token_end = token.get('end_char', 0)
-                    pos = token['pos']
-
-                    # Determine if this token should be formatted based on its POS
-                    should_format = False
-                    if highlight_nouns and pos in ['NOUN', 'PROPN']:
-                        should_format = True
-                        pos_stats['nouns'] += 1
-                    elif highlight_verbs and pos == 'VERB':
-                        should_format = True
-                        pos_stats['verbs'] += 1
-                    elif highlight_adjectives and pos == 'ADJ':
-                        should_format = True
-                        pos_stats['adjectives'] += 1
-                    elif highlight_adverbs and pos == 'ADV':
-                        should_format = True
-                        pos_stats['adverbs'] += 1
-
-                    # Mark all characters in this token with the formatting decision
-                    if should_format:
-                        words_formatted += 1
-                        for char_pos in range(token_start, token_end):
-                            char_format_decisions[char_pos] = True
-
-                # Build a list of runs with metadata about what to do with each
-                runs_info = []
-                current_char_pos = 0
-
-                for run in paragraph.runs:
-                    run_text = run.text
-                    run_length = len(run_text)
-
-                    # Check if this run contains complex field elements (citations, references)
-                    has_complex_field = False
-                    if run._element is not None:
-                        for child in run._element:
-                            tag_name = child.tag
-                            if 'fldChar' in tag_name or 'instrText' in tag_name or 'fldData' in tag_name:
-                                has_complex_field = True
-                                break
-
-                    # Store run info
-                    runs_info.append({
-                        'run': run,
-                        'element': run._element,  # Keep reference to original element
-                        'start_pos': current_char_pos,
-                        'end_pos': current_char_pos + run_length,
-                        'text': run_text,
-                        'has_complex_field': has_complex_field,
-                        'original_formatting': {
-                            'font_name': run.font.name,
-                            'font_size': run.font.size,
-                            'font_color': run.font.color.rgb if run.font.color.rgb else None,
-                            'bold': run.bold,
-                            'italic': run.italic,
-                            'underline': run.underline
-                        }
-                    })
-
-                    current_char_pos += run_length
-
-                # Get paragraph element for manipulating XML
-                paragraph_element = paragraph._element
-
-                # First, remove all existing runs from the paragraph
-                for run in paragraph.runs:
-                    run._element.getparent().remove(run._element)
-
-                # Now rebuild runs in the correct order
-                for run_info in runs_info:
-                    # If this run has complex fields, reinsert the original element
-                    if run_info['has_complex_field']:
-                        logger.debug(f"Preserving run with complex field (citation/reference)")
-                        paragraph_element.append(run_info['element'])
-                        continue
-
-                    run_start = run_info['start_pos']
-                    run_text = run_info['text']
-                    orig_fmt = run_info['original_formatting']
-
-                    if not run_text:
-                        # Empty run, skip it
-                        continue
-
-                    # Split this run into segments based on char_format_decisions
-                    char_idx = 0
-                    while char_idx < len(run_text):
-                        char_pos = run_start + char_idx
-                        should_format_segment = char_format_decisions.get(char_pos, False)
-
-                        # Find the end of this segment (consecutive chars with same decision)
-                        segment_start = char_idx
-                        while (char_idx < len(run_text) and
-                               char_format_decisions.get(run_start + char_idx, False) == should_format_segment):
-                            char_idx += 1
-
-                        # Create a new run element for this segment
-                        segment_text = run_text[segment_start:char_idx]
-
-                        # Use paragraph.add_run which adds to the end (which maintains order since we process sequentially)
-                        new_run = paragraph.add_run(segment_text)
-
-                        # Apply original formatting
-                        if orig_fmt['font_name']:
-                            new_run.font.name = orig_fmt['font_name']
-                        if orig_fmt['font_size']:
-                            new_run.font.size = orig_fmt['font_size']
-                        if orig_fmt['font_color']:
-                            new_run.font.color.rgb = orig_fmt['font_color']
-                        if orig_fmt['bold'] is not None:
-                            new_run.bold = orig_fmt['bold']
-                        if orig_fmt['italic'] is not None:
-                            new_run.italic = orig_fmt['italic']
-                        if orig_fmt['underline'] is not None:
-                            new_run.underline = orig_fmt['underline']
-
-                        # Apply new formatting if this segment should be formatted
-                        if should_format_segment:
-                            new_run.font.color.rgb = RGBColor(r, g, b)
-
-                            if font_family:
-                                new_run.font.name = font_family
-
-                            if font_size:
-                                new_run.font.size = Pt(font_size)
-
-                            if apply_bold:
-                                new_run.bold = True
-                            if apply_italic:
-                                new_run.italic = True
-                            if apply_underline:
-                                new_run.underline = True
-
-
-                # Restore paragraph formatting
-                paragraph.style = original_style
-                if original_alignment:
-                    paragraph.alignment = original_alignment
-
-            # Save document
+            # Always save the document, even when nothing matched: downstream
+            # operations (preview, download) chain from this file via
+            # `formatted_path` and must find a valid, existing DOCX on disk.
             doc.save(output_path)
 
             logger.info(f"DOCX text formatting completed: {paragraphs_processed} paragraphs processed, "
@@ -2331,6 +2454,7 @@ class FormattingService:
         except Exception as e:
             logger.error(f"DOCX text formatting error: {str(e)}")
             raise FormattingException(f"DOCX text formatting failed: {str(e)}")
+
 
     def get_available_styles(self, file_format: str) -> Dict[str, Any]:
         """
@@ -2434,9 +2558,48 @@ class FormattingService:
             if src_fmt.space_after is not None:
                 dest_paragraph.paragraph_format.space_after = src_fmt.space_after
 
+        self._copy_list_numbering(dest_paragraph, source_paragraph)
+
         for run in runs:
             new_run = dest_paragraph.add_run(run.text)
             self._copy_run_formatting(run, new_run)
+
+    @staticmethod
+    def _copy_list_numbering(dest_paragraph, source_paragraph) -> None:
+        """Copy numbering (bullet/number) and indentation onto ``dest_paragraph``.
+
+        When a list item is moved into a table cell (framing), its numbering
+        properties (``w:numPr``) and indentation (``w:ind``) live under the
+        paragraph's ``w:pPr`` and are not carried over by python-docx's normal
+        style/run copy. Without this, list items lose their bullet/number and
+        collapse to the base indentation once encapsulated in a table.
+
+        Args:
+            dest_paragraph: python-docx paragraph object to copy onto.
+            source_paragraph: python-docx paragraph object to copy from.
+        """
+        src_pPr = source_paragraph._p.pPr
+        if src_pPr is None:
+            return
+
+        num_pr = src_pPr.find(qn('w:numPr'))
+        indent = src_pPr.find(qn('w:ind'))
+        if num_pr is None and indent is None:
+            return
+
+        dest_pPr = dest_paragraph._p.get_or_add_pPr()
+
+        if num_pr is not None:
+            existing = dest_pPr.find(qn('w:numPr'))
+            if existing is not None:
+                dest_pPr.remove(existing)
+            dest_pPr.append(deepcopy(num_pr))
+
+        if indent is not None:
+            existing_indent = dest_pPr.find(qn('w:ind'))
+            if existing_indent is not None:
+                dest_pPr.remove(existing_indent)
+            dest_pPr.append(deepcopy(indent))
 
     @staticmethod
     def _has_page_break_before(paragraph) -> bool:
