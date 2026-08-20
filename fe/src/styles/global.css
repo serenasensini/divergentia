@@ -466,6 +466,22 @@ html[data-game-theme='true'] .button--primary::before {
   border-top: 1px solid var(--border);
 }
 
+.app-footer__credits {
+  font-size: 0.8rem;
+  opacity: 0.75;
+}
+
+.app-footer__credits a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.app-footer__credits a:hover,
+.app-footer__credits a:focus-visible {
+  opacity: 1;
+}
+
 /* ---------------- Workshop hub ---------------- */
 .upload__enter { margin-top: 1.25rem; }
 

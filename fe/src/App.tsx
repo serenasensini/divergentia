@@ -42,6 +42,16 @@ export function App() {
 
       {route !== 'welcome' && (
         <footer className="app-footer">
+          <span className="app-footer__credits">
+            {t('app.credits')} ·{' '}
+            <a
+              href="https://github.com/serenasensini/divergentia"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {t('app.repo')}
+            </a>
+          </span>
           <LanguageSelector id="footer-language" />
           <button
             type="button"

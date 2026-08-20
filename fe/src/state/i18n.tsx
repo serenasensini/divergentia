@@ -27,6 +27,8 @@ const en = {
   app: {
     skip: 'Skip to main content',
     settings: 'Settings & companion',
+    credits: 'Made by Serena Sensini & Martina Ricci',
+    repo: 'Source code',
   },
   language: {
     label: 'Language',
@@ -352,6 +354,8 @@ const it: Dict = {
   app: {
     skip: 'Vai al contenuto principale',
     settings: 'Impostazioni generali',
+    credits: 'Creato da Serena Sensini & Martina Ricci',
+    repo: 'Codice sorgente',
   },
   language: {
     label: 'Lingua',

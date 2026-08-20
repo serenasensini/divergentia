@@ -2,6 +2,7 @@
 Keyword Extraction Service - Extract keywords from text using spaCy
 """
 import logging
+import os
 from typing import List, Dict, Optional, Any
 from collections import Counter
 
@@ -16,25 +17,31 @@ logger = logging.getLogger(__name__)
 class KeywordService:
     """Service for extracting keywords from text using spaCy NLP"""
 
-    def __init__(self) -> None:
-        """Initialize keyword service with Italian language model"""
+    def __init__(self, model_name: Optional[str] = None) -> None:
+        """Initialize keyword service with the configured spaCy language model.
+
+        Args:
+            model_name: spaCy model to load. Falls back to the SPACY_MODEL
+                        environment variable / app config (default: it_core_news_lg).
+        """
         self.nlp: Optional[Any] = None
+        self._model_name = model_name or os.getenv('SPACY_MODEL', 'it_core_news_lg')
         self._load_model()
 
     def _load_model(self) -> None:
-        """Load spaCy Italian language model"""
+        """Load the configured spaCy language model"""
         try:
             import spacy
             try:
-                self.nlp = spacy.load("it_core_news_lg")
-                logger.info("Italian spaCy model loaded successfully")
+                self.nlp = spacy.load(self._model_name)
+                logger.info(f"spaCy model '{self._model_name}' loaded successfully")
             except OSError:
-                logger.warning("Italian spaCy model not found. Attempting to download...")
+                logger.warning(f"spaCy model '{self._model_name}' not found. Attempting to download...")
                 import subprocess
                 import sys
-                subprocess.check_call([sys.executable, "-m", "spacy", "download", "it_core_news_lg-3.8.0"])
-                self.nlp = spacy.load("it_core_news_lg-3.8.0")
-                logger.info("Italian spaCy model downloaded and loaded successfully")
+                subprocess.check_call([sys.executable, "-m", "spacy", "download", self._model_name])
+                self.nlp = spacy.load(self._model_name)
+                logger.info(f"spaCy model '{self._model_name}' downloaded and loaded successfully")
 
             # Only add the rule-based sentencizer when the loaded pipeline has no
             # component that already sets sentence boundaries. Stacking the

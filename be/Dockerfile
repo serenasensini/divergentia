@@ -16,8 +16,12 @@ WORKDIR /app
 
 # Install runtime Python dependencies (dev/test tools are intentionally excluded).
 COPY requirements.txt .
+
+ARG SPACY_MODEL=it_core_news_lg
+ENV SPACY_MODEL=${SPACY_MODEL}
+
 RUN pip install --no-cache-dir -r requirements.txt \
-    && python -m spacy download it_core_news_lg
+    && python -m spacy download ${SPACY_MODEL}
 
 # Drop the compilers once wheels are built to slim the final image.
 RUN apt-get purge -y gcc g++ && apt-get autoremove -y

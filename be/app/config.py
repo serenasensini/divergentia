@@ -35,6 +35,9 @@ class Config:
     CORS_METHODS = os.getenv('CORS_METHODS', 'GET,POST,PUT,DELETE,OPTIONS').split(',')
     CORS_ALLOW_HEADERS = os.getenv('CORS_ALLOW_HEADERS', 'Content-Type,Authorization').split(',')
 
+    # spaCy Configuration
+    SPACY_MODEL = os.getenv('SPACY_MODEL', 'it_core_news_lg')
+
     # Ollama Configuration
     OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
     OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'llama2')
