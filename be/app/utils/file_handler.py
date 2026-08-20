@@ -22,6 +22,50 @@ logger = logging.getLogger(__name__)
 # which otherwise surfaces to the client as a 400 (upload) or 422 (processing).
 MAX_FILENAME_LENGTH = 200
 
+# Number of bytes read from the start of an upload to sniff its real content
+# type (magic bytes). Large enough to cover the ZIP local-file-header magic
+# used by DOCX/XLSX/... and the OLE2 compound-file header used by legacy DOC,
+# small enough to never meaningfully impact upload latency.
+MAGIC_SNIFF_BYTES = 4096
+
+# Canonical MIME types accepted for each supported extension, used to
+# validate uploads *by content* (via libmagic) rather than trusting the
+# filename extension alone. Several real-world variants are listed per type
+# because different libmagic versions/OS builds report DOCX/DOC slightly
+# differently (e.g. an empty/near-empty DOCX can be sniffed as plain 'zip'
+# before python-docx even opens it).
+ALLOWED_CONTENT_TYPES = {
+    'pdf': {'application/pdf'},
+    'docx': {
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/zip',  # DOCX is a ZIP container; some libmagic builds stop there.
+    },
+    'doc': {
+        'application/msword',
+        'application/x-ole-storage',
+        'application/vnd.ms-office',
+    },
+    'txt': {'text/plain', 'text/x-python', 'inode/x-empty', 'application/octet-stream'},
+}
+
+
+def _looks_like_text(sample: bytes) -> bool:
+    """Heuristic: True if ``sample`` contains no NUL bytes and decodes as UTF-8.
+
+    Used as a permissive fallback for ``.txt`` uploads: libmagic's exact MIME
+    label for short/ASCII samples is not always 'text/plain' (e.g. very short
+    buffers), so a plain "no binary junk, valid UTF-8" check avoids false
+    rejections of legitimate plain-text files.
+    """
+    if b"\x00" in sample:
+        return False
+    try:
+        sample.decode('utf-8')
+        return True
+    except UnicodeDecodeError:
+        return False
+
+
 
 def cap_filename(filename: str, max_len: int = MAX_FILENAME_LENGTH) -> str:
     """Ensure a filename stays within filesystem length limits.
@@ -81,6 +125,73 @@ def validate_file(filename: str, file_size: int) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
+def validate_file_content(file, claimed_extension: str) -> Tuple[bool, Optional[str]]:
+    """
+    Validate an uploaded file's *actual* content type against what its
+    filename extension claims, using magic-byte (libmagic) content sniffing.
+
+    This defends against the classic "spoofed upload" attack where a
+    malicious payload (e.g. an executable or script) is simply renamed with
+    an allowed extension (e.g. ``.docx``) to slip past extension-only checks.
+
+    The check is content-based and does not depend on the file being saved
+    to disk yet: it reads a small buffer from the *start* of the stream and
+    restores the original stream position afterwards, so the caller can
+    still ``file.save(...)`` the full, untouched stream.
+
+    Args:
+        file: A file-like/FileStorage object (must support ``read``/``seek``).
+        claimed_extension: The extension the upload claims to be (e.g. 'docx',
+            without the leading dot).
+
+    Returns:
+        Tuple of (is_valid, error_message).
+    """
+    claimed_extension = claimed_extension.lower().lstrip('.')
+    allowed_types = ALLOWED_CONTENT_TYPES.get(claimed_extension)
+    if not allowed_types:
+        # Unknown extension: let the caller's extension check handle it.
+        return True, None
+
+    try:
+        file.seek(0)
+        sample = file.read(MAGIC_SNIFF_BYTES)
+        file.seek(0)
+    except Exception as e:
+        logger.warning(f"Could not read upload stream for content sniffing: {str(e)}")
+        return True, None  # Fail open: don't block uploads on a sniffing glitch.
+
+    if not sample:
+        return False, "Uploaded file is empty"
+
+    try:
+        detected_type = magic.Magic(mime=True).from_buffer(sample)
+    except Exception as e:
+        logger.warning(f"Content sniffing failed ({str(e)}); skipping content validation")
+        return True, None
+
+    if detected_type in allowed_types:
+        return True, None
+
+    # Permissive fallback for .txt: libmagic's exact label for short/ASCII
+    # samples isn't always 'text/plain', so accept any content that looks
+    # like real text (no NUL bytes, valid UTF-8) instead of only comparing
+    # to a fixed MIME string.
+    if claimed_extension == 'txt' and _looks_like_text(sample):
+        return True, None
+
+    logger.warning(
+        f"Content/extension mismatch: claimed '.{claimed_extension}' but "
+        f"detected content type '{detected_type}'"
+    )
+    return False, (
+        f"File content does not match its '.{claimed_extension}' extension "
+        f"(detected: {detected_type}). The file may be corrupted or "
+        f"mislabeled."
+    )
+
+
+
 def save_uploaded_file(file, upload_folder: str) -> Tuple[str, str]:
     """
     Save uploaded file securely.
@@ -96,9 +207,21 @@ def save_uploaded_file(file, upload_folder: str) -> Tuple[str, str]:
         FileUploadException: If save fails
     """
     try:
-        # Secure the filename
+        # Secure the filename: werkzeug's secure_filename() strips directory
+        # separators, '..' segments and other unsafe characters.
         original_filename = file.filename
         secured = secure_filename(original_filename)
+
+        # secure_filename() can legitimately return an empty string for
+        # filenames made entirely of unsafe characters (e.g. "../../etc/passwd",
+        # "????.docx", or a name using only non-ASCII characters it strips).
+        # Saving with an empty stem would produce a hidden/malformed filename;
+        # reject explicitly with a clear error instead.
+        if not secured or not Path(secured).stem:
+            raise FileUploadException(
+                "The uploaded filename is invalid or unsafe; please rename the file "
+                "using standard letters, numbers, dashes or underscores."
+            )
 
         # Generate unique filename to avoid collisions
         import uuid
@@ -120,12 +243,29 @@ def save_uploaded_file(file, upload_folder: str) -> Tuple[str, str]:
 
         # Save file
         file_path = os.path.join(upload_folder, unique_filename)
+
+        # Defense in depth: even though secure_filename() already strips path
+        # separators and '..' segments, explicitly confirm the resolved path
+        # still lives inside upload_folder before writing to disk. This
+        # guards against directory traversal regressions in this or future
+        # code paths that build file_path differently.
+        real_upload_folder = os.path.realpath(upload_folder)
+        real_file_path = os.path.realpath(file_path)
+        if os.path.commonpath([real_upload_folder, real_file_path]) != real_upload_folder:
+            logger.error(
+                f"Rejected upload: resolved path '{real_file_path}' escapes "
+                f"upload folder '{real_upload_folder}'"
+            )
+            raise FileUploadException("Invalid upload path")
+
         file.save(file_path)
 
         logger.info(f"File saved: {file_path}")
 
         return file_path, original_filename
 
+    except FileUploadException:
+        raise
     except Exception as e:
         logger.error(f"Failed to save file: {str(e)}")
         raise FileUploadException(f"Failed to save file: {str(e)}")

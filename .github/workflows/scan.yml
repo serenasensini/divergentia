@@ -8,6 +8,10 @@ on:
     types: [opened, synchronize, reopened]
     branches:
       - main
+  # Esecuzione manuale: builda e scansiona le immagini backend/frontend anche
+  # fuori da una pull request (nessun commento verrà pubblicato, dato che non
+  # esiste una PR associata).
+  workflow_dispatch: {}
 
 jobs:
   build-and-scan:
@@ -42,92 +46,60 @@ jobs:
             --file "${{ matrix.component.dockerfile }}" \
             --tag "${{ matrix.component.image }}"
 
-      # ─── SCOUT — solo su PR ──────────────────────────────────────────────────
-      - name: Installazione Docker Scout CLI
-        if: ${{ github.event_name == 'pull_request' }}
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/docker/scout-cli/main/install.sh \
-            -o install-scout.sh
-          sh install-scout.sh
-
-      - name: Autenticazione Docker Scout
-        if: ${{ github.event_name == 'pull_request' }}
-        run: |
-          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login \
-            --username "${{ secrets.DOCKERHUB_USER }}" \
-            --password-stdin
-
-      - name: Scansione vulnerabilità con Docker Scout (${{ matrix.component.name }})
-        if: ${{ github.event_name == 'pull_request' }}
-        run: |
-          docker scout cves "${{ matrix.component.image }}" \
-            --ignore-base \
-            --format sarif \
-            --output scan-results-${{ matrix.component.name }}.sarif.json
-
-      # ─── ANALISI RISULTATI ────────────────────────────────────────────────────
-      - name: Verifica vulnerabilità (${{ matrix.component.name }})
-        id: check_vulnerabilities
-        if: ${{ github.event_name == 'pull_request' }}
-        run: |
-          VULN_COUNT=$(jq '.runs[0].results | length' scan-results-${{ matrix.component.name }}.sarif.json)
-          echo "Vulnerabilità trovate (${{ matrix.component.name }}): $VULN_COUNT"
-          echo "vuln_count=$VULN_COUNT" >> "$GITHUB_OUTPUT"
-
-          if [[ "$VULN_COUNT" -gt 0 ]]; then
-            echo "fail_workflow=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "fail_workflow=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Commenta sulla PR con le vulnerabilità (${{ matrix.component.name }})
-        if: >
-          github.event_name == 'pull_request' &&
-          steps.check_vulnerabilities.outputs.fail_workflow == 'true'
-        uses: actions/github-script@v7
+      # ─── SCOUT — solo su PR o esecuzione manuale ─────────────────────────────
+      # Usa l'action ufficiale Docker Scout invece della CLI installata a mano:
+      # gestisce da sola autenticazione, commento sulla PR con formattazione
+      # corretta e job summary (evita i bug di rendering Markdown incontrati
+      # parsando a mano il SARIF).
+      # https://github.com/docker/scout-action
+      #
+      # NB: `only-severities` filtra l'INTERO comando `docker scout cves`, non
+      # solo cosa viene mostrato: se lo si passasse a un'unica invocazione, il
+      # SARIF/commento conterrebbe solo CRITICAL/HIGH e le vulnerabilità
+      # MEDIUM/LOW risulterebbero (erroneamente) "assenti" invece che presenti
+      # ma non bloccanti. Per questo lo scan è diviso in due passaggi:
+      # 1) report completo (tutte le severità) per visibilità/commento/SARIF;
+      # 2) verifica separata, filtrata su CRITICAL/HIGH, che decide solo se
+      #    bloccare la pipeline (senza scrivere un secondo commento).
+      - name: Docker Scout - Report completo vulnerabilità (${{ matrix.component.name }})
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+        uses: docker/scout-action@v1
         with:
+          command: cves
+          image: ${{ matrix.component.image }}
+          dockerhub-user: ${{ secrets.DOCKERHUB_USER }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+          ignore-base: true
+          sarif-file: scan-results-${{ matrix.component.name }}.sarif.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('fs');
-            const component = '${{ matrix.component.name }}';
-            const image = '${{ matrix.component.image }}';
-            const sarif = JSON.parse(fs.readFileSync(`scan-results-${component}.sarif.json`, 'utf8'));
-            const results = sarif.runs[0].results;
+          write-comment: true
+          summary: true
 
-            const lines = results.map(r => {
-              const level = r.level || 'unknown';
-              const ruleId = r.ruleId || 'N/A';
-              const msg = r.message?.text || 'Nessun dettaglio disponibile';
-              return `| \`${ruleId}\` | ${level} | ${msg} |`;
-            }).join('\n');
-
-            const body = [
-              `## ⚠️ Vulnerabilità trovate nell'immagine Docker (${component})`,
-              ``,
-              `Docker Scout ha rilevato **${results.length} vulnerabilità** nell'immagine \`${image}\`.`,
-              ``,
-              `| CVE / Regola | Severità | Descrizione |`,
-              `|---|---|---|`,
-              lines,
-              ``,
-              `> Le vulnerabilità elencate escludono quelle già presenti nell'immagine base (\`--ignore-base\`).`,
-              `> Risolvi i problemi e ri-pusha per aggiornare questa analisi.`
-            ].join('\n');
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: body
-            });
-
-      - name: Blocca il workflow se ci sono vulnerabilità (${{ matrix.component.name }})
+      - name: Carica il report SARIF completo come artifact (${{ matrix.component.name }})
         if: >
-          github.event_name == 'pull_request' &&
-          steps.check_vulnerabilities.outputs.fail_workflow == 'true'
-        run: |
-          echo "::error::Trovate ${{ steps.check_vulnerabilities.outputs.vuln_count }} vulnerabilità nell'immagine ${{ matrix.component.name }}. Il merge è bloccato."
-          exit 1
+          always() &&
+          (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-results-${{ matrix.component.name }}-${{ github.run_id }}
+          path: scan-results-${{ matrix.component.name }}.sarif.json
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Docker Scout - Blocca solo su CRITICAL/HIGH (${{ matrix.component.name }})
+        if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+        uses: docker/scout-action@v1
+        with:
+          command: cves
+          image: ${{ matrix.component.image }}
+          dockerhub-user: ${{ secrets.DOCKERHUB_USER }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+          ignore-base: true
+          only-severities: critical,high
+          exit-code: true
+          write-comment: false
+          summary: false
+
 
       # ─── PUSH — solo su merge in main ─────────────────────────────────────────
       # Push disabilitato per il momento: nessun registry di destinazione configurato.

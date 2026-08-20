@@ -20,6 +20,8 @@ export const formatsFixture: SupportedFormatsResponse = {
   format_details: {
     txt: { format: 'txt', option_details: {} },
   },
+  max_upload_size_bytes: 10485760,
+  max_upload_size_mb: 10,
 };
 
 export const uploadFixture: UploadResponse = {

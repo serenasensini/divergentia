@@ -30,6 +30,10 @@ export interface FormatDetail {
 export interface SupportedFormatsResponse {
   supported_formats: string[];
   format_details: Record<string, FormatDetail>;
+  /** Maximum accepted upload size, in bytes. */
+  max_upload_size_bytes?: number;
+  /** Maximum accepted upload size, in megabytes (rounded, for display). */
+  max_upload_size_mb?: number;
 }
 
 export interface UploadResponse {
