@@ -373,7 +373,8 @@ class DocumentService:
         document_id: str,
         summary_type: str = 'brief',
         add_to_document: bool = False,
-        output_folder: Optional[str] = None
+        output_folder: Optional[str] = None,
+        model: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generate summary of document.
@@ -386,6 +387,9 @@ class DocumentService:
                 and a new processed version is produced.
             output_folder: Folder to save the processed document. Required when
                 ``add_to_document`` is True.
+            model: Optional Ollama model tag to use for this request (FE "AI
+                model tier" selector, see issue #22). Falls back to the
+                server's configured default model when omitted.
 
         Returns:
             Summary information. When ``add_to_document`` is True the response
@@ -405,7 +409,8 @@ class DocumentService:
         # Generate summary using Ollama
         summary_result = self.ollama_service.summarize_document(
             text_content,
-            summary_type=summary_type
+            summary_type=summary_type,
+            model=model
         )
 
         response = {
@@ -452,7 +457,8 @@ class DocumentService:
         style: str = 'formal',
         sections: Optional[list] = None,
         apply_to_document: bool = False,
-        output_folder: Optional[str] = None
+        output_folder: Optional[str] = None,
+        model: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Paraphrase document or specific sections.
@@ -466,6 +472,9 @@ class DocumentService:
                 and headings) and a new processed version is produced.
             output_folder: Folder to save the processed document. Required when
                 ``apply_to_document`` is True.
+            model: Optional Ollama model tag to use for this request (FE "AI
+                model tier" selector, see issue #22). Falls back to the
+                server's configured default model when omitted.
 
         Returns:
             Paraphrased content. When ``apply_to_document`` is True the response
@@ -493,13 +502,15 @@ class DocumentService:
                 if 0 <= idx < len(chunks):
                     paraphrased_sections[idx] = self.ollama_service.paraphrase_text(
                         chunks[idx],
-                        style=style
+                        style=style,
+                        model=model
                     )
         else:
             # Paraphrase all chunks
             paraphrased_chunks = self.ollama_service.batch_paraphrase(
                 chunks,
-                style=style
+                style=style,
+                model=model
             )
             paraphrased_sections = {
                 idx: text for idx, text in enumerate(paraphrased_chunks)
