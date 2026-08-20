@@ -177,9 +177,16 @@ export function UploadScreen({ onUploaded }: { onUploaded?: () => void }) {
           accept={acceptAttr}
           aria-label={t('upload.chooseAria')}
           onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) void handleFile(file);
-            e.target.value = '';
+            const input = e.currentTarget;
+            const file = input.files?.[0];
+            if (!file) return;
+            // Reset the input only *after* the upload has finished. Clearing it
+            // synchronously invalidates the FileList (and with it the File's
+            // backing blob) while the request body is still being read, which
+            // makes the upload hang forever in Firefox.
+            void handleFile(file).finally(() => {
+              input.value = '';
+            });
           }}
         />
         {formats && (

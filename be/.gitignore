@@ -87,3 +87,5 @@ path/
 
 # Internal-only documentation (not for the public repository)
 README_INTERNAL.md
+local_uploads/
+local_outputs/

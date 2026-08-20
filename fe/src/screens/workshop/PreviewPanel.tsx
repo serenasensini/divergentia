@@ -11,20 +11,19 @@ interface PreviewPanelProps {
 }
 
 type Phase = 'loading' | 'ready' | 'error';
-type Mode = 'document' | 'text';
 
 /**
- * Live preview of the current (latest processed) document. Defaults to a rich
- * rendering of the real Word file — with every colour, frame and highlight —
- * via an embedded docx viewer, and offers a plain-text fallback. Both refresh
- * whenever refreshKey changes.
+ * Live preview of the current (latest processed) document: a rich rendering of
+ * the real Word file — with every colour, frame and highlight — via an embedded
+ * docx viewer. The viewer can be collapsed for a calmer, lower-stimulation
+ * view, and refreshes whenever refreshKey changes.
  */
 export function PreviewPanel({ documentId, refreshKey }: PreviewPanelProps) {
   const { t } = useI18n();
   const [phase, setPhase] = useState<Phase>('loading');
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [error, setError] = useState('');
-  const [mode, setMode] = useState<Mode>('document');
+  const [showDocument, setShowDocument] = useState(true);
 
   const load = useCallback(async () => {
     setPhase('loading');
@@ -47,38 +46,36 @@ export function PreviewPanel({ documentId, refreshKey }: PreviewPanelProps) {
       <div className="preview__head">
         <h2 id="preview-title">{t('preview.title')}</h2>
         <div className="preview__controls">
-          <div
-            className="preview__modes"
-            role="group"
-            aria-label={t('preview.title')}
+          <button
+            type="button"
+            className={`button button--ghost${showDocument ? ' is-active' : ''}`}
+            aria-pressed={showDocument}
+            onClick={() => setShowDocument((prev) => !prev)}
           >
-            <button
-              type="button"
-              className={`button button--ghost preview__mode${mode === 'document' ? ' is-active' : ''}`}
-              aria-pressed={mode === 'document'}
-              onClick={() => setMode('document')}
-            >
-              {t('preview.showDocument')}
-            </button>
-            <button
-              type="button"
-              className={`button button--ghost preview__mode${mode === 'text' ? ' is-active' : ''}`}
-              aria-pressed={mode === 'text'}
-              onClick={() => setMode('text')}
-            >
-              {t('preview.showText')}
-            </button>
-          </div>
+            <span className="button__icon" aria-hidden="true">
+              📄
+            </span>
+            {t('preview.showDocument')}
+          </button>
           <button
             type="button"
             className="button button--ghost"
             onClick={() => void load()}
           >
+            <span className="button__icon" aria-hidden="true">
+              🔄
+            </span>
             {t('common.refresh')}
           </button>
         </div>
       </div>
 
+      {phase === 'loading' && <p aria-live="polite">{t('preview.loading')}</p>}
+      {phase === 'error' && (
+        <p className="preview__error" role="alert">
+          {error}
+        </p>
+      )}
       {phase === 'ready' && preview && (
         <p className="preview__counts">
           {t('preview.counts', {
@@ -88,22 +85,8 @@ export function PreviewPanel({ documentId, refreshKey }: PreviewPanelProps) {
         </p>
       )}
 
-      {mode === 'document' ? (
+      {showDocument && (
         <DocxPreview documentId={documentId} refreshKey={refreshKey} />
-      ) : (
-        <>
-          {phase === 'loading' && (
-            <p aria-live="polite">{t('preview.loading')}</p>
-          )}
-          {phase === 'error' && (
-            <p className="preview__error" role="alert">
-              {error}
-            </p>
-          )}
-          {phase === 'ready' && preview && (
-            <p className="preview__text">{preview.text_preview}</p>
-          )}
-        </>
       )}
     </aside>
   );

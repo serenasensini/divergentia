@@ -102,7 +102,6 @@ const en = {
     nova: {
       blurb: 'A steady turtle who keeps everything one clear step at a time.',
     },
-    ember: { blurb: 'A gentle dragon who highlights and colours with care.' },
   },
   notifications: {
     region: 'Notifications',
@@ -335,7 +334,6 @@ const en = {
     error: 'Could not load the preview.',
     counts: '{words} words · {chars} characters',
     showDocument: 'Show document',
-    showText: 'Show text only',
     renderError:
       'Could not render the document preview. The text preview is still available.',
   },
@@ -430,7 +428,6 @@ const it: Dict = {
     nova: {
       blurb: 'Una tartaruga costante che procede sempre un passo chiaro alla volta.',
     },
-    ember: { blurb: 'Un drago gentile che evidenzia e colora con cura.' },
   },
   notifications: {
     region: 'Notifiche',
@@ -664,7 +661,6 @@ const it: Dict = {
     error: 'Impossibile caricare l\'anteprima.',
     counts: '{words} parole · {chars} caratteri',
     showDocument: 'Mostra documento',
-    showText: 'Mostra solo testo',
     renderError:
       'Impossibile mostrare l\'anteprima del documento. L\'anteprima testuale è comunque disponibile.',
   },

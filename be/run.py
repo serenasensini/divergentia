@@ -19,4 +19,4 @@ if __name__ == '__main__':
     debug = app.config.get('DEBUG', False)
 
     # Run the application
-    app.run(host=host, port=port, debug=debug)
+    app.run(host=host, port=port, debug=debug, threaded=True)

@@ -83,6 +83,9 @@ export function WorkshopHub({ onNewDocument }: WorkshopHubProps) {
             href={apiClient.downloadUrl(documentId)}
             download
           >
+            <span className="button__icon" aria-hidden="true">
+              ⬇️
+            </span>
             {t('common.download')}
           </a>
           <button
@@ -90,6 +93,9 @@ export function WorkshopHub({ onNewDocument }: WorkshopHubProps) {
             className="button button--ghost"
             onClick={onNewDocument}
           >
+            <span className="button__icon" aria-hidden="true">
+              📂
+            </span>
             {t('hub.bringAnother')}
           </button>
         </div>

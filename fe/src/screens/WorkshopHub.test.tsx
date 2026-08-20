@@ -47,14 +47,10 @@ describe('WorkshopHub (Step 3)', () => {
   });
 
   it('loads the live preview with word counts', async () => {
-    const user = userEvent.setup();
     renderHub();
     await waitFor(() =>
       expect(screen.getByText(/9 words/i)).toBeInTheDocument(),
     );
-    // Switch to the plain-text view to assert the extracted preview text.
-    await user.click(screen.getByRole('button', { name: /show text only/i }));
-    expect(screen.getByText(/preview of the document text/i)).toBeInTheDocument();
   });
 
   it('renders reading and AI tool stations', async () => {
@@ -89,9 +85,9 @@ describe('WorkshopHub (Step 3)', () => {
     const user = userEvent.setup();
     const { container } = renderHub();
     await screen.findByText(/9 words/i);
-    // Use the plain-text view: axe cannot traverse the docx preview iframe
-    // under jsdom ("Respondable target must be a frame in the current window").
-    await user.click(screen.getByRole('button', { name: /show text only/i }));
+    // Collapse the docx preview: axe cannot traverse its iframe under jsdom
+    // ("Respondable target must be a frame in the current window").
+    await user.click(screen.getByRole('button', { name: /show document/i }));
     expect(await axe(container)).toHaveNoViolations();
   });
 

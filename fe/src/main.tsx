@@ -14,49 +14,47 @@ import './styles/global.css';
  * clear its caches on startup. The self-destroying /sw.js handles browsers that
  * only run their registered worker; this covers the current page load.
  */
-function purgeStaleServiceWorkers(): void {
+async function purgeStaleServiceWorkers(): Promise<void> {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) {
     return;
   }
-  navigator.serviceWorker
-    .getRegistrations()
-    .then((registrations) => {
-      for (const registration of registrations) {
-        void registration.unregister();
-      }
-    })
-    .catch(() => {
-      /* Ignore: nothing we can do if the SW API rejects. */
-    });
+  try {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(
+      registrations.map((r) => r.unregister()),
+    );
+  } catch {
+    /* Ignore: nothing we can do if the SW API rejects. */
+  }
 
   if ('caches' in window) {
-    caches
-      .keys()
-      .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
-      .catch(() => {
-        /* Ignore. */
-      });
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+    } catch {
+      /* Ignore. */
+    }
   }
 }
 
-purgeStaleServiceWorkers();
+purgeStaleServiceWorkers().then(() => {
+  const container = document.getElementById('root');
 
-const container = document.getElementById('root');
+  if (!container) {
+    throw new Error('Root container #root not found');
+  }
 
-if (!container) {
-  throw new Error('Root container #root not found');
-}
-
-createRoot(container).render(
-  <StrictMode>
-    <PreferencesProvider>
-      <I18nProvider>
-        <ToastProvider>
-          <DocumentProvider>
-            <App />
-          </DocumentProvider>
-        </ToastProvider>
-      </I18nProvider>
-    </PreferencesProvider>
-  </StrictMode>,
-);
+  createRoot(container).render(
+    <StrictMode>
+      <PreferencesProvider>
+        <I18nProvider>
+          <ToastProvider>
+            <DocumentProvider>
+              <App />
+            </DocumentProvider>
+          </ToastProvider>
+        </I18nProvider>
+      </PreferencesProvider>
+    </StrictMode>,
+  );
+});

@@ -16,7 +16,6 @@ export const CHARACTERS: AssistantCharacter[] = [
   { id: 'lumi', name: 'Lumi', emoji: '🦉' },
   { id: 'pip', name: 'Pip', emoji: '🦊' },
   { id: 'nova', name: 'Nova', emoji: '🐢' },
-  { id: 'ember', name: 'Ember', emoji: '🐉' },
 ];
 
 export const DEFAULT_CHARACTER_ID = CHARACTERS[0].id;
