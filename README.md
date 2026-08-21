@@ -13,11 +13,17 @@ The interface is intentionally low-stimulation and configurable (theme, font —
 including a dyslexia-friendly face —, text size and reduced motion) to support
 neurodivergent users.
 
+Demo: ![Divergentia demo](./divergentia-demo.gif)
+
+Demo available on Render: <https://divergentia.onrender.com> (or run locally with Docker/Podman).
+
+> Please note that Render free-tier instances may take a while to start up, and AI features are disabled in the demo due to Ollama licensing restrictions. For full functionality, run the app locally with Ollama installed.
+
 ---
 
 ## Authors
 
-Idea and design by **Serena Sensini** and **Martina Ricci**.
+Idea and design by **Serena Sensini** and **Martina Ricci** and the intellectual property has to be attributed to them. The code is maintained by **Serena Sensini** and **Martina Ricci**.
 
 ## License
 
@@ -26,6 +32,25 @@ This project is licensed under the
 license. You are free to use, share and adapt the work for **private and academic**
 purposes, provided you give appropriate credit to the authors. **Commercial use is
 not permitted.** See the [LICENSE](./LICENSE) file for the full terms.
+
+---
+
+# Table of contents
+
+<!-- TOC -->
+* [Divergentia](#divergentia)
+  * [Authors](#authors)
+  * [License](#license)
+* [Table of contents](#table-of-contents)
+  * [Architecture](#architecture)
+  * [Prerequisites](#prerequisites)
+  * [Run locally (manual)](#run-locally-manual)
+    * [1. Back-end (Flask API)](#1-back-end-flask-api)
+    * [2. Front-end (React + Vite)](#2-front-end-react--vite)
+  * [Run with Docker / Podman](#run-with-docker--podman)
+  * [Testing](#testing)
+  * [Project layout](#project-layout)
+<!-- TOC -->
 
 ---
 
