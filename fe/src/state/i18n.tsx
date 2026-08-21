@@ -127,6 +127,8 @@ const en = {
     tooLarge:
       '"{name}" is too large ({size}). The maximum allowed size is {max}.',
     genericError: 'Something went wrong while uploading. Please try again.',
+    timeout:
+      'The upload did not go through. Your browser could not read that file — try copying it somewhere else (for example your Documents folder) and choosing it again.',
     resultName: 'Name',
     resultType: 'Type',
     resultSize: 'Size',
@@ -453,6 +455,8 @@ const it: Dict = {
     tooLarge:
       '"{name}" è troppo grande ({size}). La dimensione massima consentita è {max}.',
     genericError: 'Qualcosa è andato storto durante il caricamento. Riprova.',
+    timeout:
+      'Il caricamento non è andato a buon fine. Il browser non è riuscito a leggere quel file — prova a copiarlo altrove (per esempio nella cartella Documenti) e a selezionarlo di nuovo.',
     resultName: 'Nome',
     resultType: 'Tipo',
     resultSize: 'Dimensione',

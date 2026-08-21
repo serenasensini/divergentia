@@ -106,8 +106,18 @@ export function UploadScreen({ onUploaded }: { onUploaded?: () => void }) {
       } catch (err) {
         setPhase('error');
         setResult(null);
-        const detail =
-          err instanceof ApiError ? err.message : t('upload.genericError');
+        // An aborted upload means the request never completed — most often the
+        // browser could not read the chosen file (e.g. a sandboxed browser
+        // denied access to it), in which case it silently sends no data.
+        const aborted =
+          err instanceof DOMException
+            ? err.name === 'AbortError'
+            : err instanceof Error && err.name === 'AbortError';
+        const detail = aborted
+          ? t('upload.timeout')
+          : err instanceof ApiError
+            ? err.message
+            : t('upload.genericError');
         setMessage(detail);
       }
     },

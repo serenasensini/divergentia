@@ -24,6 +24,28 @@ describe('api client', () => {
     expect(res.original_filename).toBe('notes.txt');
   });
 
+  it('aborts an upload whose request never completes', async () => {
+    // Reproduces the failure mode where the browser announces a body it never
+    // sends (e.g. it cannot read the file): the request would otherwise hang
+    // forever, leaving the UI stuck on "Uploading…".
+    const stalling: typeof fetch = (_input, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('The operation was aborted.', 'AbortError'));
+        });
+      });
+
+    const impatient = createApiClient({
+      fetchImpl: stalling,
+      uploadTimeoutMs: 20,
+    });
+    const file = new File(['hello world'], 'notes.txt', { type: 'text/plain' });
+
+    await expect(impatient.uploadDocument(file)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+  });
+
   it('raises ApiError with the server message on failure', async () => {
     mockEndpoint(
       'POST',

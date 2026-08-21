@@ -39,7 +39,17 @@ export class ApiError extends Error {
 export interface ApiClientOptions {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
+  /** Abort an upload that makes no progress (see UPLOAD_TIMEOUT_MS). */
+  uploadTimeoutMs?: number;
 }
+
+/**
+ * Upload ceiling, aligned with the 120s read timeout used by gunicorn and the
+ * Nginx front-end. Without it a browser that silently fails to produce the
+ * request body (e.g. it cannot read the chosen file) leaves the UI stuck on
+ * "Uploading…" forever, with no error and no way out.
+ */
+export const UPLOAD_TIMEOUT_MS = 120_000;
 
 /**
  * Default base URL. Empty in the browser (same-origin via Vite proxy).
@@ -77,6 +87,7 @@ export function createApiClient(options: ApiClientOptions = {}) {
   const doFetch: typeof fetch = options.fetchImpl
     ? options.fetchImpl
     : (...args: Parameters<typeof fetch>) => globalThis.fetch(...args);
+  const uploadTimeoutMs = options.uploadTimeoutMs ?? UPLOAD_TIMEOUT_MS;
   const url = (path: string) => `${baseUrl}${path}`;
 
   return {
@@ -101,10 +112,20 @@ export function createApiClient(options: ApiClientOptions = {}) {
     async uploadDocument(file: File): Promise<UploadResponse> {
       const form = new FormData();
       form.append('file', file);
-      const res = await doFetch(url('/api/documents/upload'), {
-        method: 'POST',
-        body: form,
-      });
+      // Manual AbortController (rather than AbortSignal.timeout) to stay
+      // compatible with the jsdom test environment.
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), uploadTimeoutMs);
+      let res: Response;
+      try {
+        res = await doFetch(url('/api/documents/upload'), {
+          method: 'POST',
+          body: form,
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
       if (!res.ok) return parseError(res);
       return (await res.json()) as UploadResponse;
     },
